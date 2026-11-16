@@ -126,32 +126,40 @@
     return { sec, how, tr, access, person };
   }
 
+  /* Scores over the list of trip times t (minutes, one entry per person and direction) with weights w.
+     Lower is better. All three are generalized means, so they can be checked by hand:
+       sum      weighted mean (L1)         fastest for the group in total
+       balanced root-mean-square (L2)      between the two: long trips cost more than short ones
+       max      longest trip (L-infinity)  fairest; the mean is a tiny tie-break among equal longest trips */
   const AGG = {
     sum: (t, w) => t.reduce((s, x, i) => s + x * w[i], 0) / w.reduce((a, b) => a + b, 0),
-    max: (t) => Math.max(...t) + 0.001 * t.reduce((a, b) => a + b, 0),
-    balanced: (t, w) => AGG.sum(t, w) + 0.5 * (Math.max(...t) - Math.min(...t)),
+    max: (t) => Math.max(...t) + 1e-4 * t.reduce((a, b) => a + b, 0) / t.length,
+    balanced: (t, w) => Math.sqrt(t.reduce((s, x, i) => s + x * x * w[i], 0) / w.reduce((a, b) => a + b, 0)),
   };
 
-  /* opts: {objective, maxMinutes, restaurantWeight 0..1, restaurants: Int32Array|null, top} */
+  /* A person may come back to a different place: person.ret = {lat, lon} (absent = same as the start).
+     Both directions count as separate trips in every score, so a person who returns to the same
+     address simply counts twice (max and balanced are unchanged, sum is doubled for everybody alike).
+     The way back is timed as the way there from that address (the network is symmetric enough).
+     opts: {objective, maxMinutes, top} */
   function solve(net, people, opts) {
-    opts = Object.assign({ objective: "max", maxMinutes: 0, restaurantWeight: 0, restaurants: null, top: 3 }, opts);
+    opts = Object.assign({ objective: "max", maxMinutes: 0, top: 3 }, opts);
     const per = people.map(p => personTimes(net, p));
-    const w = people.map(p => p.weight || 1), st = net.graph.stations;
+    const back = people.map((p, i) => p.ret ? personTimes(net, Object.assign({}, p, { lat: p.ret.lat, lon: p.ret.lon })) : per[i]);
+    const w = people.map(p => p.weight || 1), ww = w.concat(w), st = net.graph.stations;
     const rows = [];
     for (let c = 0; c < net.R; c++) {
-      const t = per.map(r => r.sec[c] / 60);
+      const out = per.map(r => r.sec[c] / 60), ret = back.map(r => r.sec[c] / 60), t = out.concat(ret);
       if (t.some(x => !isFinite(x))) continue;
-      const rest = opts.restaurants ? opts.restaurants[c] : 0;
-      const bonus = opts.restaurantWeight * 10 * Math.min(rest, 25) / 25;
-      const score = AGG[opts.objective](t, w) - bonus;
-      rows.push({ c, hub: st[c][4], score, times: t, sum: t.reduce((a, b) => a + b, 0), max: Math.max(...t), rest, over: opts.maxMinutes > 0 && Math.max(...t) > opts.maxMinutes });
+      const max = Math.max(...t);
+      rows.push({ c, hub: st[c][4], score: AGG[opts.objective](t, ww), times: out, back: ret, sum: t.reduce((a, b) => a + b, 0), max, over: opts.maxMinutes > 0 && max > opts.maxMinutes });
     }
     let pool = rows.filter(r => !r.over), relaxed = false;
     if (!pool.length) { pool = rows; relaxed = true; }
     pool.sort((a, b) => a.score - b.score);
     const seen = new Set(), top = [];
     for (const r of pool) { if (seen.has(r.hub)) continue; seen.add(r.hub); top.push(r); if (top.length >= opts.top) break; }
-    return { top, relaxed, per, rows };
+    return { top, relaxed, per, back, rows };
   }
 
   /* Itinerary for one person to station c: list of legs
@@ -187,6 +195,11 @@
     return legs;
   }
 
+  /* The same itinerary read the other way: from the meeting point to where the person is going. */
+  function reverseLegs(legs) {
+    return legs.slice().reverse().map(l => Object.assign({}, l, { coords: l.coords.slice().reverse() }));
+  }
+
   /* Append the optional bus add-on (data/graph-bus.json) to the rail graph. */
   function mergeGraph(base, bus) {
     if (bus.baseStations !== base.stations.length || bus.baseLines !== base.lines.length || bus.baseLnodes !== base.lnodes.length)
@@ -198,6 +211,6 @@
     });
   }
 
-  const api = { mergeGraph, Network, hav, directSeconds, personTimes, solve, itinerary };
+  const api = { mergeGraph, Network, hav, directSeconds, personTimes, solve, itinerary, reverseLegs, AGG };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.MP = api;
 })(typeof window !== "undefined" ? window : globalThis);

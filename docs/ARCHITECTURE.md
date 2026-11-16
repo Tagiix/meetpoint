@@ -23,8 +23,10 @@ car with a distance-based speed model + 8 min parking) and a multi-source Dijkst
 on foot (≤ 2.2 km) or by bike (≤ 6.5 km; buses: 1.2 km and 3 km). The person's time to a station is the minimum.
 A person with only "transit" ticked still walks to stations; "walk" controls direct walking trips.
 
-`solve()` scores every rail station: `max` (fairness), `sum` (weighted mean), `balanced` (mean + ½ spread); subtracts a bonus
-for restaurants nearby (up to 10 min-equivalent, saturating at 25 places); excludes stations over the user's longest-trip limit
+`solve()` scores every rail station over the list of trip times (one per person and direction, so each person counts twice; the way back uses the person's `ret`
+address when set, timed like the way there from that address, and counts as a duplicate of the way there otherwise). Scores are generalized means, checkable by hand:
+`max` (longest trip, mean as tie-break), `sum` (weighted mean), `balanced` (weighted root-mean-square). Nothing but travel time enters a score.
+Stations over the user's longest-trip limit are excluded
 (if nobody qualifies it shows the closest and says so); keeps the best station per hub (same-name stations within 700 m).
 Ten people solve in about 10 ms (rail) and 250 ms (with buses).
 
@@ -36,7 +38,9 @@ A canvas below Leaflet's panes; Leaflet only provides pan/zoom, markers and the 
 green areas, water polygons (even-odd, so islands are holes), rivers, roads (4 tiers, secondary/tertiary load lazily from `roads-detail.json` at zoom ≥ 12),
 optional bus lines, rail lines by mode, restaurant glow (zoom < 14.5, drawn at ¼ resolution and scaled up to blur) or dots (zoom ≥ 14.5, names at ≥ 16),
 town and park names, stations and their labels (collision-avoided). Points are stored as mercator floats (`Float32Array`) and culled by bounding box.
-`zoomAnimation` is off so the canvas can redraw on every move.
+`zoomAnimation` is off. The canvas is 20 % larger than the view on every side and is only slid by the browser while dragging; it is repainted when the
+zoom changes or when a drag has used up its margin. Roads are batched into one stroke per style (thousands of strokes per frame was the cost).
+The flow canvas is separate and cheap.
 
 ## Events (`api/meetup.php`)
 One file per event: `data/events/<id>.php` = a guard line + JSON `{id, title, options, people[], adminHash, created, updated, rev}`.
@@ -49,7 +53,7 @@ Each person: `{id, name, addr, lat, lon, weight, modes, hash}`. Reads and writes
 | `GET meetup.php?id=ID[&rev=N]` | knowing the id | public view of the event |
 | `POST {action:"create", title, options}` | none | returns `{id, adminKey}` |
 | `POST {action:"join", id, p}` | knowing the id | adds a position, returns `{pid, token}` |
-| `POST {action:"update", id, pid, token, p}` | that entry's token | edit own entry |
+| `POST {action:"update", id, pid, token \| adminKey, p}` | entry token or organizer | edit an entry (`p.ret` = way-back address or null) |
 | `POST {action:"leave", id, pid, token \| adminKey}` | entry token or organizer | remove an entry |
 | `POST {action:"options", id, adminKey, title?, options}` | organizer | settings and title |
 | `POST {action:"delete", id, adminKey}` | organizer | delete the event |

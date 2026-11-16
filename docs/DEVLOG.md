@@ -31,6 +31,17 @@ minimize the longest trip, restaurants nearby), a nice flow animation, and the *
 7. **Security finding by the smoke test**: event files under `data/events/*.json` were readable over the web on servers that ignore `.htaccess` (`php -S`, nginx). Events are now stored as `<id>.php` with a guard line, safe on every server.
 8. Live updates skipped while a form had focus, so a stale focus froze the organizer's view. Polling now updates everything except the field being edited.
 
+## Round 3 (after the first public release)
+- **Smoother map.** Profiling (headless Chromium, forced readback) showed roads, not restaurants, dominated the repaint cost: the whole canvas was repainted on every `move` event
+  with one stroke per road. Now: oversized canvas slid while dragging, repaint on zoom or when the margin is used, roads batched per style, cheap joins/caps, no road outline below zoom 12,
+  cheaper restaurant glow. Restaurants stay (cost about 15 ms of a repaint at low zoom), toggle in the legend. All routing was already client side.
+- **Removed the restaurant preference** from scoring (UI, option, `restaurants.json`, build step): only measurable times.
+- **"Balanced" was broken for two people**: mean + ½·range equals the max exactly when n = 2, so Fairest and Balanced always agreed (198/200 random pairs). Now the root-mean-square.
+- **Round trips**: optional different address for the way back; scores use both directions (max over both, sum and RMS over both). The animation has a Going / Coming back selector.
+- **Organizer can edit anyone's entry**, addresses are editable in the edit panel, stations can be picked by clicking (snap) or by autocomplete (rail, bus stops).
+- **Route visibility**: planned routes are dotted with a white halo, the travelled part is thick and solid (walking stays dotted).
+- Tests: solver tests cover the scores and the way back; the e2e test covers organizer editing, station search and the way back.
+
 ## Not done / ideas
 - Meeting points other than stations (squares, parks, restaurants themselves).
 - Live traffic and real-time departures; PRIM/Navitia API integration for exact journeys.

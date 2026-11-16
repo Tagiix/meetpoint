@@ -4,8 +4,7 @@ Usage (needs `pip install osmium`):
     python3 tools/build_osm.py ile-de-france-latest.osm.pbf
 Download: https://download.geofabrik.de/europe/france/ile-de-france-latest.osm.pbf
 Writes data/roads.json (motorway..primary), roads-detail.json (secondary, tertiary), water.json,
-green.json (parks and forests, with names), places.json (towns), pois.json (restaurants, cafés, bars)
-and restaurants.json (restaurant/cafe/bar/pub count within 300 m of each station of data/graph.json)."""
+green.json (parks and forests, with names), places.json (towns), pois.json (restaurants, cafés, bars: shown on the map, never used for scoring)."""
 import json, math, os, sys
 from collections import defaultdict
 import osmium
@@ -98,17 +97,4 @@ dump("roads-detail.json", {k: roads[k] for k in ("secondary", "tertiary")})
 dump("water.json", {"rivers": rivers, "areas": water}); dump("green.json", {"polys": green, "names": green_names})
 dump("places.json", places); dump("pois.json", pois)
 
-# restaurants near each station
-st = json.load(open(os.path.join(DATA, "graph.json"), encoding="utf-8"))["stations"]
-grid = defaultdict(list)
-for la, lo in food: grid[(int(la * 300), int(lo * 200))].append((la, lo))
-counts = {}
-for s in st:
-    gx, gy = int(s[2] * 300), int(s[3] * 200); c = 0
-    for dx in (-1, 0, 1):
-        for dy in (-1, 0, 1):
-            for la, lo in grid.get((gx + dx, gy + dy), []):
-                if math.hypot((la - s[2]) * 111320, (lo - s[3]) * 73000) <= 300: c += 1
-    counts[s[0]] = c
-dump("restaurants.json", counts)
-print("food places:", len(food), "| max near a station:", max(counts.values()))
+print("food places:", len(food))

@@ -11,7 +11,6 @@ All files in `data/` are **generated and committed**, so a fresh clone works wit
 | `roads.json`, `roads-detail.json` | 1.2 MB, 2.7 MB | motorway to primary; secondary and tertiary | OpenStreetMap | `tools/build_osm.py` |
 | `water.json`, `green.json` | 0.8 MB, 2.5 MB | rivers, water polygons; parks and forests with names | OpenStreetMap | `tools/build_osm.py` |
 | `places.json`, `pois.json` | 10 KB, 0.8 MB | town names; ~24,000 restaurants, cafés and bars | OpenStreetMap | `tools/build_osm.py` |
-| `restaurants.json` | 15 KB | places to eat within 300 m of each station | OpenStreetMap | `tools/build_osm.py` |
 | `events/` | — | runtime event store, **not** in git | — | `api/meetup.php` |
 
 The app works with only `graph.json` and `rail-lines.json`; the OpenStreetMap files and `*-bus*` files add map detail and features.

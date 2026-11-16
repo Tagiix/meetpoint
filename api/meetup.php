@@ -8,8 +8,9 @@
 //   GET  meetup.php?id=ID[&rev=N]             -> event (or {"unchanged":true} if rev matches)
 //   POST {action:"create", title, options}   -> {id, adminKey}
 //   POST {action:"join",   id, p}            -> {pid, token}
-//   POST {action:"update", id, pid, token, p}
-//   POST {action:"leave",  id, pid, token}   (adminKey instead of token also works)
+//   POST {action:"update", id, pid, token, p}  (adminKey instead of token also works: the organizer edits anyone)
+//   POST {action:"leave",  id, pid, token}     (same)
+//   p = {name, addr, lat, lon, modes, weight, ret: {addr, lat, lon} | null}   ret = where they go back to
 //   POST {action:"options", id, adminKey, title?, options}
 //   POST {action:"delete", id, adminKey}
 header('Content-Type: application/json; charset=utf-8');
@@ -29,15 +30,19 @@ function path_of($id) { global $dir; return "$dir/$id.php"; }
 function unguard($raw) { return strncmp($raw, GUARD, strlen(GUARD)) === 0 ? substr($raw, strlen(GUARD)) : $raw; }
 function read_event($id) { return json_decode(unguard((string)file_get_contents(path_of($id))), true); }
 
-function clean_person($p) {
+function clean_pos($p) {
     if (!is_array($p) || !isset($p['lat'], $p['lon']) || !is_numeric($p['lat']) || !is_numeric($p['lon'])) { fail(400, 'bad position'); }
     $lat = (float)$p['lat']; $lon = (float)$p['lon'];
     if ($lat < 47.9 || $lat > 49.5 || $lon < 1.2 || $lon > 3.9) { fail(400, 'position outside Île-de-France'); }
+    return ['addr' => mb_substr((string)($p['addr'] ?? ''), 0, 120), 'lat' => $lat, 'lon' => $lon];
+}
+// A person has a start position and, optionally, a different position for the way back ('ret', null = same place).
+function clean_person($p) {
+    $pos = clean_pos($p);
     $m = isset($p['modes']) && is_array($p['modes']) ? $p['modes'] : [];
-    return [
+    return $pos + [
         'name' => trim(mb_substr((string)($p['name'] ?? ''), 0, 40)) ?: 'Guest',
-        'addr' => mb_substr((string)($p['addr'] ?? ''), 0, 120),
-        'lat' => $lat, 'lon' => $lon,
+        'ret' => isset($p['ret']) && is_array($p['ret']) ? clean_pos($p['ret']) : null,
         'weight' => max(1, min(3, (int)($p['weight'] ?? 1))),
         'modes' => ['walk' => !empty($m['walk']), 'transit' => !empty($m['transit']), 'bike' => !empty($m['bike']), 'car' => !empty($m['car'])],
     ];
@@ -48,7 +53,6 @@ function clean_options($o) {
         'objective' => in_array($o['objective'] ?? '', ['max', 'sum', 'balanced'], true) ? $o['objective'] : 'max',
         'profile' => (int)($o['profile'] ?? 0) === 1 ? 1 : 0,
         'maxmin' => max(0, min(180, (int)($o['maxmin'] ?? 0))),
-        'restw' => max(0, min(1, round((float)($o['restw'] ?? 0), 2))),
         'buses' => !empty($o['buses']),
     ];
 }
@@ -118,7 +122,7 @@ switch ($action) {
         with_event($id, function (&$e) use ($in, $action, $is_admin) {
             foreach ($e['people'] as $i => $q) {
                 if ($q['id'] !== ($in['pid'] ?? '')) { continue; }
-                $ok = (isset($in['token']) && hash_equals($q['hash'], h($in['token']))) || ($action === 'leave' && $is_admin($e));
+                $ok = (isset($in['token']) && hash_equals($q['hash'], h($in['token']))) || $is_admin($e);   // the organizer may edit or remove anyone
                 if (!$ok) { fail(403, 'not your entry'); }
                 if ($action === 'leave') { array_splice($e['people'], $i, 1); return ['ok' => true]; }
                 $p = clean_person($in['p'] ?? null); $p['id'] = $q['id']; $p['hash'] = $q['hash'];

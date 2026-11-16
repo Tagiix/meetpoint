@@ -18,7 +18,7 @@ echo "[static files]"
 for f in assets/app.js assets/solver.js assets/basemap.js assets/flow.js assets/api.js assets/style.css data/graph.json data/rail-lines.json; do
   [ "$(code "$BASE/$f")" = 200 ] && ok "$f" || bad "$f is missing or not served"
 done
-for f in data/graph-bus.json data/bus-lines.json data/roads.json data/roads-detail.json data/water.json data/green.json data/places.json data/pois.json data/restaurants.json; do
+for f in data/graph-bus.json data/bus-lines.json data/roads.json data/roads-detail.json data/water.json data/green.json data/places.json data/pois.json; do
   [ "$(code "$BASE/$f")" = 200 ] && ok "$f" || warn "$f missing: optional, the map or a feature will be reduced (see docs/DATA.md)"
 done
 

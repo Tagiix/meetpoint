@@ -4,8 +4,10 @@ Find the fairest place to meet in Île-de-France. One person creates an **event*
 everyone who opens it adds their own position and how they travel (walk, transit, bike, car, optionally
 buses). The best meeting stations update live and an animation shows everybody travelling there.
 
-- Optimizes for the **fairest** meeting point (shortest longest trip), the **fastest overall**, or **balanced**.
-- Optional limits: longest acceptable trip, preference for areas with restaurants, weekday or weekend timetables.
+- Optimizes for the **fairest** meeting point (shortest longest trip), the **fastest overall** (least total time) or **balanced** (root-mean-square of trip times). Only measurable travel times are used.
+- Each person can give a different address for the way back; both directions count as trips. Addresses can be typed, picked on the map (click a station to snap to it) or searched as a metro/RER/bus station.
+- The organizer can edit or remove anybody's entry.
+- Optional limits: longest acceptable trip, weekday or weekend timetables.
 - Abstract map built from open data: rail lines in official colours, roads, the Seine, parks, towns, and every
   restaurant, café and bar. No map tile service, no API keys.
 - Runs on a **basic PHP server**: no database, no build step, no Node on the server. The routing runs in the browser.

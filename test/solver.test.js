@@ -42,3 +42,30 @@ console.log(it2.map(l => `${l.mode}${l.label !== l.mode ? " " + l.label : ""} ${
 const total = it2.reduce((s, l) => s + (l.wait || 0) + l.sec, 0);
 assert(Math.abs(total - r2.per[0].sec[r2.top[0].c]) < 1, "legs add up to the solver time");
 console.log("bus ok");
+
+// ---- scoring is checkable by hand ----
+const pair = [at("La Défense"), at("Gare de Lyon"), at("Massy - Palaiseau")];
+for (const obj of ["max", "sum", "balanced"]) {
+  const r = MP.solve(net, pair, { objective: obj, top: 5 });
+  const best = r.rows.reduce((m, x) => (x.score < m.score ? x : m));
+  assert.strictEqual(r.top[0].score, best.score, obj + ": top[0] has the lowest score over all stations");
+}
+const rr = MP.solve(net, pair, { objective: "balanced", top: 1 }).top[0];
+assert(Math.abs(rr.score - Math.sqrt(rr.times.concat(rr.back).reduce((s, x) => s + x * x, 0) / 6)) < 1e-9, "balanced is the root-mean-square");
+const two = [at("La Défense"), at("Gare de Lyon")];
+const mx = MP.solve(net, two, { objective: "max", top: 1 }).top[0], bl = MP.solve(net, two, { objective: "balanced", top: 1 }).top[0];
+assert(mx.max <= bl.max + 1e-9 && bl.sum <= mx.sum + 1e-9, "balanced trades some fairness for total time");
+
+// ---- way back to a different address ----
+const same = MP.solve(net, two, { objective: "max", top: 1 }).top[0];
+const sameRet = MP.solve(net, two.map(p => Object.assign({}, p, { ret: { lat: p.lat, lon: p.lon } })), { objective: "max", top: 1 }).top[0];
+assert.strictEqual(same.c, sameRet.c); assert(Math.abs(same.max - sameRet.max) < 1e-9, "same return address changes nothing");
+const far = Object.assign({}, two[0], { ret: { lat: g.stations[find("Massy - Palaiseau")][2], lon: g.stations[find("Massy - Palaiseau")][3] } });
+const rf = MP.solve(net, [far, two[1]], { objective: "max", top: 1 });
+const t0 = rf.top[0];
+assert(t0.max >= Math.max(...t0.times, ...t0.back) - 1e-9 && Math.abs(t0.max - Math.max(...t0.times, ...t0.back)) < 1e-9, "max covers both directions");
+assert(rf.rows.every(r => r.max >= t0.max - 1e-9), "no station beats the best on the longest of going and coming back");
+const back = MP.reverseLegs(MP.itinerary(net, rf.back[0], t0.c));
+const tot = back.reduce((s, l) => s + (l.wait || 0) + l.sec, 0);
+assert(Math.abs(tot - rf.back[0].sec[t0.c]) < 1, "return legs add up");
+console.log("scoring and way-back ok");

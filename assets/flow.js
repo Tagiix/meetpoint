@@ -1,7 +1,8 @@
 /* Flow animation: everybody travels to the meeting point on a shared clock.
    Canvas overlay on a Leaflet map. Usage:
      const f = new Flow(map, canvas, {onTick(t, T, playing)});
-     f.setRoutes([{color, name, legs:[{mode,color,coords,sec,wait}]}], [lat,lon]); f.play(); */
+     f.setRoutes([{color, name, legs:[{mode,color,coords,sec,wait}]}], [lat,lon]); f.play();
+     Each person ends at the last point of their last leg, so the way back can end at different places. */
 (function (root) {
   "use strict";
   const MODE_COLOR = { walk: "#8793a0", bike: "#2e9e5b", car: "#60666d" };
@@ -27,7 +28,9 @@
     }
     resize() {
       const r = this.cv.getBoundingClientRect(), d = devicePixelRatio || 1;
-      this.cv.width = r.width * d; this.cv.height = r.height * d;
+      if (this.cv.width !== Math.round(r.width * d) || this.cv.height !== Math.round(r.height * d)) {   // reallocating on every map move would stutter panning
+        this.cv.width = Math.round(r.width * d); this.cv.height = Math.round(r.height * d);
+      }
       this.ctx.setTransform(d, 0, 0, d, 0, 0);
     }
     setRoutes(routes, target) {
@@ -39,7 +42,8 @@
           const pts = leg.coords;
           segs.push({ t0: tt, t1: tt + Math.max(leg.sec, 1), leg, pts, cum: plen(pts) }); tt += Math.max(leg.sec, 1);
         }
-        return { color: r.color, name: r.name, segs, T: tt };
+        const last = r.legs[r.legs.length - 1];
+        return { color: r.color, name: r.name, segs, T: tt, end: last ? last.coords[last.coords.length - 1] : target };   // where this person ends up
       });
       this.T = Math.max(0, ...this.routes.map(r => r.T));
       this.t = 0; this.draw(); this.notify();
@@ -89,7 +93,7 @@
         // full route, faint
         for (const s of rt.segs) {
           if (s.wait) continue;
-          this.stroke(s.pts, this.legColor(s.leg, rt.color), 3, 0.22, s.leg.mode === "walk" ? [2, 6] : null);
+          this.stroke(s.pts, this.legColor(s.leg, rt.color), 5, 0.85, [0.1, 9], 9);          // planned route: dotted, with a halo so it reads on any map colour
         }
       }
       for (const rt of this.routes) {
@@ -97,11 +101,11 @@
         for (const s of rt.segs) {
           if (t < s.t0) break;
           const a = this.along(s, Math.min(t, s.t1));
-          if (!s.wait) this.stroke(a.pts, this.legColor(s.leg, rt.color), 5, 0.95, s.leg.mode === "walk" ? [2, 7] : null);
+          if (!s.wait) this.stroke(a.pts, this.legColor(s.leg, rt.color), 7, 1, s.leg.mode === "walk" ? [0.1, 11] : null, 11);   // travelled part: solid (dotted for walking)
           head = a.pos; waiting = s.wait && t < s.t1;
         }
         if (!head) head = rt.segs[0].leg.coords[0];
-        const arrived = t >= rt.T, p = this.pt(arrived ? this.target : head);
+        const arrived = t >= rt.T, p = this.pt(arrived ? rt.end : head);
         if (waiting) {                                  // pulsing ring while waiting for the train
           const k = (now % 1200) / 1200;
           ctx.strokeStyle = rt.color; ctx.globalAlpha = 1 - k; ctx.lineWidth = 2;
@@ -123,10 +127,12 @@
         }
       }
     }
-    stroke(ll, color, w, alpha, dash) {
+    /* halo: width of a white outline drawn first (0 = none) */
+    stroke(ll, color, w, alpha, dash, halo) {
       if (ll.length < 2) return;
       const ctx = this.ctx; ctx.beginPath();
       ll.forEach((q, i) => { const p = this.pt(q); i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); });
+      if (halo) { ctx.strokeStyle = "#fff"; ctx.lineWidth = halo; ctx.globalAlpha = 0.75 * alpha; ctx.setLineDash(dash || []); ctx.stroke(); }
       ctx.strokeStyle = color; ctx.lineWidth = w; ctx.globalAlpha = alpha; ctx.setLineDash(dash || []); ctx.stroke();
       ctx.setLineDash([]); ctx.globalAlpha = 1;
     }

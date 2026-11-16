@@ -28,7 +28,7 @@ check('event created', !!id, id);
 check('options saved at creation', (await event()).options.objective === 'sum');
 
 // organizer adds a position by clicking on the map
-await A.fill('#d-name', 'Organizer'); await A.click('#d-pick'); await A.mouse.click(900, 480);
+await A.fill('#d-name', 'Organizer'); await A.click('[data-pick=d]'); await A.mouse.click(900, 480);
 await A.waitForSelector('.placed'); await A.click('#d-add');
 await A.waitForFunction(() => document.querySelector('#count')?.textContent.startsWith('1/'));
 check('organizer added a position', (await event()).people.length === 1);
@@ -37,7 +37,7 @@ check('organizer added a position', (await event()).people.length === 1);
 await G.goto(BASE + '?e=' + id); await G.waitForSelector('#d-name');
 check('guest does not see the organizer link', (await G.locator('#copy-adm').count()) === 0);
 check('guest settings are read-only', await G.locator('button[data-opt=objective]').first().isDisabled());
-await G.fill('#d-name', 'Guest'); await G.click('#d-pick'); await G.mouse.click(700, 300);
+await G.fill('#d-name', 'Guest'); await G.click('[data-pick=d]'); await G.mouse.click(700, 300);
 await G.waitForSelector('.placed'); await G.click('[data-dm=bike]'); await G.click('#d-add');
 await G.waitForFunction(() => document.querySelector('#count')?.textContent.startsWith('2/'));
 check('guest added a position', (await event()).people.length === 2);
@@ -48,6 +48,26 @@ check('organizer sees the guest by polling', true);
 await A.waitForSelector('.res');
 check('three ranked results', (await A.locator('.res').count()) === 3);
 await A.screenshot({ path: 'shots/organizer.png' });
+
+// the organizer edits the guest's address through the station search, and gives themself a different way back
+await A.locator('.person[data-pid]').nth(1).locator('[data-act=edit]').click();
+check('organizer can edit someone else', (await A.locator('.more').count()) === 1);
+await A.locator('.more [data-stn]').first().fill('nation');
+await A.locator('.more .suggest li').first().click();
+await A.waitForTimeout(1200);
+const guest = (await event()).people[1];
+check('guest address set from a station', /Nation/i.test(guest.addr) && Math.abs(guest.lat - 48.848) < 0.01, guest.addr);
+await A.locator('.person[data-pid]').nth(1).locator('[data-act=edit]').click();
+await A.locator('.person[data-pid]').nth(0).locator('[data-act=edit]').click();
+await A.locator('.more [data-retsw]').check();
+await A.locator('.more [data-stn=r\\:' + (await event()).people[0].id + ']').fill('gare de lyon');
+await A.locator('.more .suggest li').first().click();
+await A.waitForTimeout(1200);
+const org = (await event()).people[0];
+check('organizer has a different way back', org.ret && /Lyon/i.test(org.ret.addr), org.ret && org.ret.addr);
+await A.waitForFunction(() => /↩/.test(document.querySelector('.res')?.textContent || ''));
+check('result cards show the way back', true);
+await A.locator('.person[data-pid]').nth(0).locator('[data-act=edit]').click();
 
 // organizer changes a setting; guest edits their own entry; organizer removes the guest
 await A.click('button[data-opt=objective][data-v=balanced]'); await A.waitForTimeout(1000);

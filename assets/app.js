@@ -3,22 +3,22 @@
   const COLORS = ["#e8541e", "#2a7de1", "#2e9e5b", "#a24bd6", "#d9a400", "#e0457b", "#119da4", "#7a5c3e", "#4b5bd6", "#8a9a1f"];
   const MODES = [["walk", "Walk"], ["transit", "Transit"], ["bike", "Bike"], ["car", "Car"]];
   const OBJECTIVES = [
-    ["max", "Fairest", "Nobody travels far: minimizes the longest trip."],
+    ["max", "Fairest", "Nobody travels far: minimizes the longest trip (going or coming back)."],
     ["sum", "Fastest overall", "Least total travel time for the whole group."],
-    ["balanced", "Balanced", "Short total time, penalizing big gaps between people."],
+    ["balanced", "Balanced", "Minimizes the root-mean-square of the trip times: a compromise that punishes long trips."],
   ];
   const IDF = /^(75|77|78|91|92|93|94|95)/;
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-  const DEFAULT_OPTS = { objective: "max", profile: 0, maxmin: 0, restw: 0, buses: false };
+  const DEFAULT_OPTS = { objective: "max", profile: 0, maxmin: 0, buses: false };
   const DEFAULT_MODES = { walk: true, transit: true, bike: false, car: false };
 
   /* ---------- state ---------- */
-  const S = { api: true, ev: null, admin: null, mine: {}, draftOpts: Object.assign({}, DEFAULT_OPTS), title: "", draft: blankDraft(), editing: null, picking: false };
-  let graphBase = null, graphBus = null, restaurants = null, nets = {}, result = null, selected = 0, token = 0, lastSig = "", pollTimer = null;
-  let markers = [], draftMarker = null, targetMarker = null, solveTimer = null, optTimer = null, sugg = [], suggTimer = null;
+  const S = { api: true, ev: null, admin: null, mine: {}, draftOpts: Object.assign({}, DEFAULT_OPTS), title: "", draft: blankDraft(), editing: null, picking: null };            // picking: which address field the next map click fills (see addrField)
+  let graphBase = null, graphBus = null, nets = {}, result = null, selected = 0, token = 0, lastSig = "", pollTimer = null;
+  let markers = [], draftMarkers = [], dirn = "out", curRoutes = null, targetMarker = null, solveTimer = null, optTimer = null, sugg = [], suggTimer = null;
 
-  function blankDraft() { return { name: "", addr: "", lat: null, lon: null, modes: Object.assign({}, DEFAULT_MODES) }; }
+  function blankDraft() { return { name: "", addr: "", lat: null, lon: null, modes: Object.assign({}, DEFAULT_MODES), retOn: false, ret: { addr: "", lat: null, lon: null } }; }
 
   /* ---------- local storage (per-browser secrets: organizer key and own entries) ---------- */
   function store() { try { return JSON.parse(localStorage.getItem("meetpoint:v2")) || { events: {} }; } catch (e) { return { events: {} }; } }
@@ -35,9 +35,39 @@
   const flow = new Flow(map, $("flow"), { onTick });
   map.on("click", (e) => {
     if (!S.picking) return;
-    setPicking(false); setDraftPosition(e.latlng.lat, e.latlng.lng, "");
+    const ak = S.picking, st = snapStation(e.containerPoint); setPicking(null);
+    if (st) setPos(ak, st[2], st[3], st[1] + " (station)"); else setPos(ak, e.latlng.lat, e.latlng.lng, "");
   });
 
+  /* a click within 16 px of a metro/RER/train/tram station picks that station */
+  function snapStation(pt) {
+    if (!graphBase) return null;
+    let best = null, bd = 16;
+    for (let i = 0; i < (graphBase.railCount || graphBase.stations.length); i++) {
+      const st = graphBase.stations[i], q = map.latLngToContainerPoint([st[2], st[3]]), d = Math.hypot(q.x - pt.x, q.y - pt.y);
+      if (d < bd) { bd = d; best = st; }
+    }
+    return best;
+  }
+  /* station search: rail stations, plus bus stops once the bus data is loaded */
+  const plain = (x) => x.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  let stnPool = null;
+  function stationMatches(q) {
+    const n = plain(q), out = [], seen = new Set();
+    const R = graphBase ? (graphBase.railCount || graphBase.stations.length) : 0;
+    const all = graphBase ? graphBase.stations.slice(0, R).map((st) => [st, "rail"]).concat(graphBus ? graphBus.stations.map((st) => [st, "bus"]) : []) : [];
+    for (const [st, kind] of all) {
+      const nm = plain(st[1]); if (!nm.includes(n)) continue;
+      const key = kind + nm + Math.round(st[2] * 200) + Math.round(st[3] * 200); if (seen.has(key)) continue; seen.add(key);
+      out.push({ st, kind, rank: (nm.startsWith(n) ? 0 : 1) + (kind === "bus" ? 2 : 0) });
+    }
+    return out.sort((a, b) => a.rank - b.rank || a.st[1].length - b.st[1].length).slice(0, 6);
+  }
+  function suggestStations(q, box) {
+    if (q.length < 2) return (box.hidden = true);
+    stnPool = stationMatches(q);
+    box.innerHTML = stnPool.map((m, i) => `<li data-s="${i}">${esc(m.st[1])} <span class="muted small">${m.kind === "bus" ? "bus stop" : "station"}</span></li>`).join(""); box.hidden = !stnPool.length;
+  }
   const MODE_W = { 0: 2.2, 1: 3.6, 2: 3.4, 3: 2 };
   const getJson = (name) => fetch(`data/${name}.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
   async function loadBasemap() {
@@ -77,7 +107,7 @@
 
   function targetPoint() { const st = result.net.graph.stations[result.top[selected].c]; return [st[2], st[3]]; }
   function fitView() {
-    const pts = (S.ev ? S.ev.people.map((p) => [p.lat, p.lon]) : []);
+    const pts = (S.ev ? S.ev.people.flatMap((p) => (hasRet(p) ? [[p.lat, p.lon], [p.ret.lat, p.ret.lon]] : [[p.lat, p.lon]])) : []);
     if (result) pts.push(targetPoint());
     if (pts.length) map.fitBounds(L.latLngBounds(pts).pad(0.25));
     else map.setView([48.8566, 2.3522], 11);
@@ -98,6 +128,9 @@
   const inviteUrl = () => location.origin + location.pathname + "?e=" + S.ev.id;
   const organizerUrl = () => inviteUrl() + "&k=" + S.admin;
   const isMine = (p) => !!S.mine[p.id];
+  const canEdit = (p) => isMine(p) || !!S.admin;                    // the organizer may edit anybody
+  const hasRet = (p) => !!p.ret && (Math.abs(p.ret.lat - p.lat) > 1e-5 || Math.abs(p.ret.lon - p.lon) > 1e-5);
+  const addrOf = (q) => q.addr || q.lat.toFixed(4) + ", " + q.lon.toFixed(4);
 
   /* ---------- options form (shared by "create" and the organizer's event view) ---------- */
   function optionsHTML(o, editable) {
@@ -112,8 +145,6 @@
       <label class="switch"><span>Include buses in trips<br><span class="small muted">Loads more data, a bit slower</span></span><input type="checkbox" data-opt="buses" ${o.buses ? "checked" : ""}${dis}></label>
       <div class="field"><label>Longest trip allowed: <span class="muted">${o.maxmin ? o.maxmin + " min" : "no limit"}</span></label>
         <input type="range" data-opt="maxmin" min="0" max="120" step="5" value="${o.maxmin}"${dis}></div>
-      <div class="field"><label>Prefer places with restaurants${restaurants ? "" : ' <span class="muted">(data not built yet)</span>'}</label>
-        <input type="range" data-opt="restw" min="0" max="1" step="0.25" value="${o.restw}"${restaurants && editable ? "" : " disabled"}></div>
     </div>`;
   }
   function readOpt(target, o) {
@@ -127,7 +158,7 @@
   /* ---------- views ---------- */
   function showHome() {
     clearInterval(pollTimer); S.ev = null; S.admin = null; S.mine = {}; S.editing = null; S.draft = blankDraft();
-    document.title = "Meet Point"; clearResult(); renderMarkers(); renderDraftMarker();
+    document.title = "Meet Point"; clearResult(); renderMarkers(); renderDraftMarkers();
     const evs = Object.entries(store().events).filter(([, e]) => e.title);
     $("view").innerHTML = `
       <section><h2>Plan a meet-up</h2>
@@ -164,23 +195,41 @@
         <div class="row"><button class="btn primary sm" id="copy-inv">Copy invite link</button>${S.admin ? '<button class="btn sm" id="copy-adm" title="Open this on another device to stay organizer. Keep it private.">Copy organizer link</button>' : ""}</div>
       </div>`;
   }
+  /* An address with its three ways of being set: typing (suggestions), picking on the map, and (optionally) the device location.
+     ak says which position it edits: "d" new person, "dr" new person's way back, "p:<id>" a person, "r:<id>" a person's way back. */
+  function addrField(ak, label, pos, draft) {
+    const set = pos.lat !== null && pos.lat !== undefined;
+    return `<div class="field"><label>${label}</label>
+      <div class="searchbox" data-ak="${ak}"><input class="input" data-addr="${ak}" autocomplete="off" placeholder="Type an address in Île-de-France…" value="${esc(pos.addr || "")}"><ul class="suggest" hidden></ul></div>
+      <div class="searchbox" data-ak="${ak}"><input class="input" data-stn="${ak}" autocomplete="off" placeholder="Or a station: metro, RER, bus…"><ul class="suggest" hidden></ul></div>
+      <div class="row"><button type="button" class="btn sm" data-pick="${ak}" title="Click anywhere, or on a station to snap to it">${S.picking === ak ? "Click the map or a station…" : "Pick on map"}</button>${draft ? `<button type="button" class="btn sm" data-geo="${ak}">Use my location</button>` : ""}</div>
+      ${draft && set ? `<div class="placed"><span class="dot"></span><span class="grow">${esc(pos.addr || "Pin placed")}</span></div>` : ""}</div>`;
+  }
+  const modeChips = (modes, attr) => `<div class="chips">${MODES.map(([k, l]) => `<button type="button" class="chip ${modes[k] ? "on" : ""}" data-${attr}="${k}" aria-pressed="${!!modes[k]}">${l}</button>`).join("")}</div>`;
+  function editHTML(p) {
+    return `<div class="more">
+      <div class="field"><label>Name</label><input class="input" data-f="name" maxlength="40" value="${esc(p.name)}"></div>
+      ${addrField("p:" + p.id, "Starts from", p)}
+      <label class="switch"><span>Different address for the way back</span><input type="checkbox" data-retsw ${p.ret ? "checked" : ""}></label>
+      ${p.ret ? addrField("r:" + p.id, "Goes back to", p.ret) : ""}
+      <div class="field"><label>Travels by</label>${modeChips(p.modes, "m")}</div>
+      <div class="field"><label>Weight in "Fastest overall" and "Balanced"</label><select class="select" data-f="weight">${[1, 2, 3].map((w) => `<option value="${w}"${p.weight === w ? " selected" : ""}>×${w}</option>`).join("")}</select></div>
+      <p class="small muted">You can also drag the pins on the map.</p>
+      <button class="btn danger sm" data-act="leave" style="align-self:flex-start">Remove this entry</button>
+    </div>`;
+  }
   function renderPeople() {
     const ps = S.ev.people;
     $("count").textContent = `${ps.length}/10`;
     $("people").innerHTML = ps.length ? ps.map((p, i) => {
-      const mine = isMine(p), open = S.editing === p.id;
+      const mine = isMine(p), can = canEdit(p), open = S.editing === p.id;
       return `<li class="card person" data-pid="${p.id}">
         <span class="dot" style="background:${COLORS[i]}"></span>
         <div class="nm"><span>${esc(p.name)}</span>${mine ? '<span class="you">you</span>' : ""}</div>
-        <div class="acts row">${mine ? `<button class="btn sm" data-act="edit">${open ? "Done" : "Edit"}</button>` : ""}${S.admin && !mine ? '<button class="btn ghost sm" data-act="remove" title="Remove this person">Remove</button>' : ""}</div>
-        <div class="ad">${esc(p.addr || p.lat.toFixed(4) + ", " + p.lon.toFixed(4))}</div>
-        ${open ? `<div class="more">
-          <div class="field"><label>Name</label><input class="input" data-f="name" maxlength="40" value="${esc(p.name)}"></div>
-          <div class="field"><label>Travels by</label><div class="chips">${MODES.map(([k, l]) => `<button type="button" class="chip ${p.modes[k] ? "on" : ""}" data-m="${k}" aria-pressed="${!!p.modes[k]}">${l}</button>`).join("")}</div></div>
-          <div class="field"><label>Weight in "Fastest overall" and "Balanced"</label><select class="select" data-f="weight">${[1, 2, 3].map((w) => `<option value="${w}"${p.weight === w ? " selected" : ""}>×${w}</option>`).join("")}</select></div>
-          <p class="small muted">Drag the numbered pin on the map to move this position.</p>
-          <button class="btn danger sm" data-act="leave" style="align-self:flex-start">Remove this entry</button>
-        </div>` : `<div class="chips" style="grid-column:2/-1;margin-top:6px">${MODES.filter(([k]) => p.modes[k]).map(([, l]) => `<span class="chip static">${l}</span>`).join("")}</div>`}
+        <div class="acts row">${can ? `<button class="btn sm" data-act="edit">${open ? "Done" : "Edit"}</button>` : ""}${S.admin && !mine && !open ? '<button class="btn ghost sm" data-act="remove" title="Remove this person">Remove</button>' : ""}</div>
+        <div class="ad">${esc(addrOf(p))}</div>
+        ${hasRet(p) ? `<div class="ad back">↩ ${esc(addrOf(p.ret))}</div>` : ""}
+        ${open ? editHTML(p) : `<div class="chips" style="grid-column:2/-1;margin-top:6px">${MODES.filter(([k]) => p.modes[k]).map(([, l]) => `<span class="chip static">${l}</span>`).join("")}</div>`}
       </li>`;
     }).join("") : '<li class="empty">Nobody yet. Add the first position below.</li>';
     renderMarkers();
@@ -190,6 +239,7 @@
   function renderAddIfNeeded() {                        // the add form only depends on these two facts, so typing in it is never interrupted
     if (addState() !== addKey) renderAdd();
   }
+  const canAdd = () => { const d = S.draft; return d.lat !== null && !!d.name.trim() && (!d.retOn || d.ret.lat !== null); };
   function renderAdd() {
     addKey = addState();
     const d = S.draft, hasMine = Object.keys(S.mine).some((pid) => S.ev.people.some((p) => p.id === pid));
@@ -197,12 +247,11 @@
     $("v-add").innerHTML = `<h2>${hasMine ? "Add someone else" : "Add your position"}</h2>
       <div class="card stack">
         <div class="field"><label for="d-name">${hasMine ? "Their name" : "Your name"}</label><input id="d-name" class="input" maxlength="40" placeholder="${hasMine ? "Name" : "Your name"}" value="${esc(d.name)}"></div>
-        <div class="field"><label for="d-addr">Where from</label>
-          <div class="searchbox"><input id="d-addr" class="input" autocomplete="off" placeholder="Type an address in Île-de-France…"><ul id="suggest" hidden></ul></div>
-          <div class="row"><button type="button" class="btn sm" id="d-pick">${S.picking ? "Click on the map…" : "Pick on map"}</button><button type="button" class="btn sm" id="d-geo">Use my location</button></div>
-          ${d.lat !== null ? `<div class="placed"><span class="dot"></span><span class="grow">${esc(d.addr || "Pin placed")}</span></div>` : ""}</div>
-        <div class="field"><label>Travels by</label><div class="chips">${MODES.map(([k, l]) => `<button type="button" class="chip ${d.modes[k] ? "on" : ""}" data-dm="${k}" aria-pressed="${!!d.modes[k]}">${l}</button>`).join("")}</div></div>
-        <button id="d-add" class="btn primary block"${d.lat !== null && d.name.trim() ? "" : " disabled"}>Add to the event</button>
+        ${addrField("d", d.retOn ? "Starts from" : "Where from", d, true)}
+        <label class="switch"><span>Different address for the way back</span><input type="checkbox" data-dretsw ${d.retOn ? "checked" : ""}></label>
+        ${d.retOn ? addrField("dr", "Goes back to", d.ret, true) : ""}
+        <div class="field"><label>Travels by</label>${modeChips(d.modes, "dm")}</div>
+        <button id="d-add" class="btn primary block"${canAdd() ? "" : " disabled"}>Add to the event</button>
       </div>`;
   }
   function renderOpts() {
@@ -211,23 +260,34 @@
 
   /* ---------- markers ---------- */
   function pinIcon(label, color, cls) {
-    return L.divIcon({ className: "", iconSize: [28, 28], iconAnchor: [14, 28], html: `<div class="pin ${cls || ""}" style="background:${color}"><span>${label}</span></div>` });
+    const n = /\bret\b/.test(cls || "") ? 22 : 28;
+    return L.divIcon({ className: "", iconSize: [n, n], iconAnchor: [n / 2, n], html: `<div class="pin ${cls || ""}" style="background:${color}"><span>${label}</span></div>` });
   }
   function renderMarkers() {
-    markers.forEach((m) => m.remove());
-    markers = (S.ev ? S.ev.people : []).map((p, i) => {
-      const mine = isMine(p);
-      const m = L.marker([p.lat, p.lon], { draggable: mine, icon: pinIcon(i + 1, COLORS[i], mine ? "mine" : ""), title: p.name }).addTo(map);
+    markers.forEach((m) => m.remove()); markers = [];
+    (S.ev ? S.ev.people : []).forEach((p, i) => {
+      const can = canEdit(p);
+      const m = L.marker([p.lat, p.lon], { draggable: can, icon: pinIcon(i + 1, COLORS[i], isMine(p) ? "mine" : ""), title: p.name }).addTo(map);
       m.bindTooltip(p.name, { direction: "top", offset: [0, -26] });
-      if (mine) m.on("dragend", (e) => { const ll = e.target.getLatLng(); movePerson(p, ll.lat, ll.lng); });
-      return m;
+      if (can) m.on("dragend", (e) => { const ll = e.target.getLatLng(); setPos("p:" + p.id, ll.lat, ll.lng, "", true); });
+      markers.push(m);
+      if (hasRet(p)) {                                  // smaller pin for where they go back to
+        const r = L.marker([p.ret.lat, p.ret.lon], { draggable: can, icon: pinIcon("↩", COLORS[i], "ret"), title: p.name + " (way back)" }).addTo(map);
+        r.bindTooltip(p.name + " · way back", { direction: "top", offset: [0, -20] });
+        if (can) r.on("dragend", (e) => { const ll = e.target.getLatLng(); setPos("r:" + p.id, ll.lat, ll.lng, "", true); });
+        markers.push(r);
+      }
     });
   }
-  function renderDraftMarker() {
-    if (draftMarker) { draftMarker.remove(); draftMarker = null; }
-    const d = S.draft; if (d.lat === null) return;
-    draftMarker = L.marker([d.lat, d.lon], { draggable: true, icon: pinIcon("+", "var(--card)", "draft") }).addTo(map);
-    draftMarker.on("dragend", (e) => { const ll = e.target.getLatLng(); setDraftPosition(ll.lat, ll.lng, "", true); });
+  function renderDraftMarkers() {
+    draftMarkers.forEach((m) => m.remove()); draftMarkers = [];
+    const d = S.draft;
+    for (const [ak, pos, label] of [["d", d, "+"], ["dr", d.retOn ? d.ret : null, "↩"]]) {
+      if (!pos || pos.lat === null) continue;
+      const m = L.marker([pos.lat, pos.lon], { draggable: true, icon: pinIcon(label, "var(--card)", "draft" + (ak === "dr" ? " ret" : "")) }).addTo(map);
+      m.on("dragend", (e) => { const ll = e.target.getLatLng(); setPos(ak, ll.lat, ll.lng, "", true); });
+      draftMarkers.push(m);
+    }
   }
 
   /* ---------- address search, reverse geocoding ---------- */
@@ -235,43 +295,51 @@
     try { const r = await (await fetch(`https://api-adresse.data.gouv.fr/reverse/?lon=${lon}&lat=${lat}`, { signal: AbortSignal.timeout(4000) })).json(); return r.features[0] ? r.features[0].properties.label : "Dropped pin"; }
     catch (e) { return "Dropped pin"; }
   }
-  async function setDraftPosition(lat, lon, addr, keepView) {
-    Object.assign(S.draft, { lat, lon, addr: addr || "Locating…" }); renderAdd(); renderDraftMarker();
-    if (!keepView) map.panTo([lat, lon]);
-    if (!addr) { const a = await reverse(lat, lon); if (S.draft.lat === lat) { S.draft.addr = a; renderAdd(); } }
+  function refOf(ak) {
+    const [k, pid] = ak.split(":");
+    if (k === "d") return { o: S.draft };
+    if (k === "dr") return { o: S.draft.ret };
+    const p = S.ev && S.ev.people.find((x) => x.id === pid); if (!p) return null;
+    return { o: k === "p" ? p : p.ret, p };
   }
-  function setPicking(on) { S.picking = on; document.body.classList.toggle("picking", on); if (S.ev) renderAdd(); }
-  function suggest(q) {
+  /* set the position behind an address field; addr "" means look the address up from the coordinates */
+  async function setPos(ak, lat, lon, addr, keepView) {
+    const r = refOf(ak); if (!r || !r.o) return;
+    const done = () => (r.p ? (renderPeople(), savePerson(r.p)) : (renderAdd(), renderDraftMarkers()));
+    Object.assign(r.o, { lat, lon, addr: addr || "Locating…" }); done();
+    if (!keepView) map.panTo([lat, lon]);
+    if (!addr) { const a = await reverse(lat, lon); if (r.o.lat === lat && r.o.lon === lon) { r.o.addr = a; done(); } }
+  }
+  function setPicking(ak) {
+    const was = S.picking; S.picking = ak; document.body.classList.toggle("picking", !!ak);
+    if (S.ev && was !== ak) { renderAdd(); renderPeople(); }
+  }
+  function suggest(q, box) {
     clearTimeout(suggTimer);
-    if (q.length < 3) return ($("suggest").hidden = true);
+    if (q.length < 3) return (box.hidden = true);
     suggTimer = setTimeout(async () => {
       try {
         const r = await (await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q)}&limit=6&lat=48.85&lon=2.35`, { signal: AbortSignal.timeout(5000) })).json();
         sugg = r.features.filter((f) => IDF.test(f.properties.postcode || "")).slice(0, 5);
-        const box = $("suggest"); if (!box) return;
         box.innerHTML = sugg.map((f, i) => `<li data-i="${i}">${esc(f.properties.label)}</li>`).join(""); box.hidden = !sugg.length;
-      } catch (e) { const b = $("suggest"); if (b) b.hidden = true; }
+      } catch (e) { box.hidden = true; }
     }, 220);
   }
 
   /* ---------- actions on the event ---------- */
   async function addPerson() {
-    const d = S.draft;
+    const d = S.draft, pos = (q) => ({ addr: q.addr, lat: q.lat, lon: q.lon });
     try {
-      const r = await Api.post({ action: "join", id: S.ev.id, p: { name: d.name.trim(), addr: d.addr, lat: d.lat, lon: d.lon, modes: d.modes, weight: 1 } });
+      const r = await Api.post({ action: "join", id: S.ev.id, p: Object.assign(pos(d), { name: d.name.trim(), modes: d.modes, weight: 1, ret: d.retOn ? pos(d.ret) : null }) });
       S.mine[r.pid] = r.token; setLocal(S.ev.id, { mine: S.mine });
-      S.draft = Object.assign(blankDraft(), { modes: d.modes }); renderDraftMarker();
+      S.draft = Object.assign(blankDraft(), { modes: d.modes }); renderDraftMarkers();
       await refresh(); notice("Added.", "ok");
     } catch (e) { notice("Could not add: " + e.message, "warn"); }
   }
-  async function savePerson(p) {
-    try { await Api.post({ action: "update", id: S.ev.id, pid: p.id, token: S.mine[p.id], p }); }
+  async function savePerson(p) {                        // the owner's token or the organizer's key is accepted
+    try { await Api.post({ action: "update", id: S.ev.id, pid: p.id, token: S.mine[p.id], adminKey: S.admin, p }); }
     catch (e) { notice("Could not save: " + e.message, "warn"); }
     scheduleSolve();
-  }
-  async function movePerson(p, lat, lon) {
-    p.lat = lat; p.lon = lon; p.addr = "Locating…"; renderPeople(); savePerson(p);
-    p.addr = await reverse(lat, lon); renderPeople(); savePerson(p);
   }
   async function removePerson(p) {
     try {
@@ -289,7 +357,7 @@
     try { S.ev = await Api.get(id); } catch (e) { S.ev = null; showHome(); return notice("Event not found. It may have been deleted.", "warn"); }
     const loc = getLocal(id); S.admin = loc.admin; S.mine = loc.mine || {}; S.editing = null; S.draft = blankDraft();
     setLocal(id, { title: S.ev.title }); notice("");
-    showEvent(); renderDraftMarker(); lastSig = ""; scheduleSolve(true);
+    showEvent(); renderDraftMarkers(); lastSig = ""; scheduleSolve(true);
     fitView();
   }
   async function refresh() {
@@ -324,14 +392,15 @@
   async function solveNow(force) {
     if (!S.ev || !graphBase) return;
     const o = S.ev.options, ps = S.ev.people;
-    const sig = JSON.stringify([ps.map((p) => [p.lat, p.lon, p.modes, p.weight]), o]);
+    const sig = JSON.stringify([ps.map((p) => [p.lat, p.lon, hasRet(p) ? p.ret : null, p.modes, p.weight]), o]);
     if (sig === lastSig && !force) return; lastSig = sig;
     const sec = $("v-results"); if (!sec) return; sec.hidden = false;
     if (ps.length < 2) { clearResult(); $("cards").innerHTML = '<div class="empty">Add at least two people to see the best meeting point.</div>'; return; }
     let net; try { net = await getNet(o); } catch (e) { return notice("Could not load the bus network. Turn buses off or run tools/build_bus.py.", "warn"); }
     const keep = result && result.top[selected] ? result.top[selected].c : null;
-    result = MP.solve(net, ps, { objective: o.objective, maxMinutes: o.maxmin, restaurantWeight: o.restw, restaurants, top: 3 });
-    result.net = net;
+    const people = ps.map((p) => Object.assign({}, p, { ret: hasRet(p) ? p.ret : null }));
+    result = MP.solve(net, people, { objective: o.objective, maxMinutes: o.maxmin, top: 3 });
+    result.net = net; result.people = people;
     if (!result.top.length) { clearResult(); $("cards").innerHTML = '<div class="empty">No meeting point is reachable for everyone. Check that each person can reach the rail network with a mode they ticked.</div>'; return; }
     const same = result.top.findIndex((r) => r.c === keep);
     result.relaxedLimit = result.relaxed ? o.maxmin : 0;
@@ -350,29 +419,36 @@
       <div class="card res ${k === selected ? "on" : ""}" data-k="${k}" role="button" tabindex="0">
         <div class="t"><b>${esc(st[r.c][1])}</b><span class="rank">#${k + 1}</span></div>
         <div class="times">${S.ev.people.map((p, i) => `
-          <span style="color:${COLORS[i]}">●</span><span class="bar" title="${esc(p.name)}"><i style="width:${Math.min(100, r.times[i] / (r.max || 1) * 100)}%;background:${COLORS[i]}"></i></span><span data-t="${k}-${i}">${Math.round(r.times[i])} min</span>`).join("")}</div>
-        <div class="meta">Longest ${Math.round(r.max)} min · average ${Math.round(r.sum / r.times.length)} min${restaurants ? ` · ${r.rest} places to eat nearby` : ""}</div>
+          <span style="color:${COLORS[i]}">●</span><span class="bar" title="${esc(p.name)}"><i style="width:${Math.min(100, Math.max(r.times[i], r.back[i]) / (r.max || 1) * 100)}%;background:${COLORS[i]}"></i></span><span data-t="${k}-${i}">${Math.round(r.times[i])} min${result.people[i].ret ? ` · ↩ ${Math.round(r.back[i])}` : ""}</span>`).join("")}</div>
+        <div class="meta">Longest ${Math.round(r.max)} min · average ${Math.round(r.sum / (r.times.length + r.back.length))} min</div>
       </div>`).join("");
   }
 
   /* ---------- selection, routes, animation ---------- */
   async function select(k) {
-    selected = k; const my = ++token, r = result.top[k], st = result.net.graph.stations[r.c], ps = S.ev.people;
+    selected = k; const my = ++token, r = result.top[k], st = result.net.graph.stations[r.c], people = result.people;
     document.querySelectorAll("#cards .res").forEach((el) => el.classList.toggle("on", +el.dataset.k === k));
-    const routes = ps.map((p, i) => ({ name: p.name, color: COLORS[i], legs: MP.itinerary(result.net, result.per[i], r.c) }));
+    const anyBack = people.some((p) => p.ret);
+    const route = (p, i, legs) => ({ name: p.name, color: COLORS[i], legs });
+    const out = people.map((p, i) => route(p, i, MP.itinerary(result.net, result.per[i], r.c)));
+    const back = anyBack ? people.map((p, i) => route(p, i, MP.reverseLegs(MP.itinerary(result.net, result.back[i], r.c)))) : null;
+    if (!anyBack) dirn = "out";
+    $("dir").hidden = !anyBack; $("dir").value = dirn;
+    curRoutes = { out, back };
     const target = [st[2], st[3]];
     if (targetMarker) targetMarker.remove();
     targetMarker = L.marker(target, { icon: L.divIcon({ className: "", html: '<div class="target">★</div>', iconSize: [34, 34], iconAnchor: [17, 17] }), zIndexOffset: 1000 }).addTo(map).bindTooltip(st[1], { direction: "top", offset: [0, -18] });
     fitView();
-    $("player").hidden = false; flow.setRoutes(routes, target); flow.play();
+    $("player").hidden = false; flow.setRoutes(curRoutes[dirn], target); flow.play();
     loadPlaces(st);
-    await refine(routes, my);                          // real street geometry for walk/bike/car legs
+    await refine(out.concat(back || []), my);          // real street geometry for walk/bike/car legs
     if (my !== token) return;
     const wasPlaying = flow.playing, t = flow.t / (flow.T || 1);
-    flow.setRoutes(routes, target); flow.seek(t); if (wasPlaying) flow.play();
+    flow.setRoutes(curRoutes[dirn], target); flow.seek(t); if (wasPlaying) flow.play();
     // street routes change the estimates: update the card so its numbers match the animation
-    r.times = routes.map((rt) => rt.legs.reduce((s, l) => s + (l.wait || 0) + l.sec, 0) / 60);
-    r.max = Math.max(...r.times); r.sum = r.times.reduce((a, b) => a + b, 0);
+    const mins = (rts) => rts.map((rt) => rt.legs.reduce((s, l) => s + (l.wait || 0) + l.sec, 0) / 60);
+    r.times = mins(out); r.back = back ? mins(back) : r.times.slice();
+    r.max = Math.max(...r.times, ...r.back); r.sum = r.times.concat(r.back).reduce((a, b) => a + b, 0);
     renderCards();
   }
   const OSRM = { walk: "routed-foot", bike: "routed-bike", car: "routed-car" };
@@ -396,6 +472,7 @@
   }
   $("play").onclick = () => (flow.playing ? flow.pause() : flow.play());
   $("seek").oninput = () => { flow.pause(); flow.seek($("seek").value / 1000); };
+  $("dir").onchange = () => { dirn = $("dir").value; if (!curRoutes) return; flow.setRoutes(curRoutes[dirn] || curRoutes.out, [0, 0]); flow.play(); };
   $("speed").onchange = () => { flow.speed = +$("speed").value; };
 
   function loadPlaces(st) {                              // from the local OpenStreetMap data: no network, instant
@@ -415,13 +492,17 @@
     if (t.id === "copy-inv") return copyText(inviteUrl(), $("inv-url"));
     if (t.id === "copy-adm") return copyText(organizerUrl(), $("inv-url"));
     if (t.id === "del") { if (confirm("Delete this event for everyone?")) { await Api.post({ action: "delete", id: S.ev.id, adminKey: S.admin }).catch(() => {}); const s = store(); delete s.events[S.ev.id]; putStore(s); go(null); } return; }
-    if (t.id === "d-pick") return setPicking(!S.picking);
-    if (t.id === "d-geo") return geolocate();
+    if (t.dataset.pick) return setPicking(S.picking === t.dataset.pick ? null : t.dataset.pick);
+    if (t.dataset.geo) return geolocate(t.dataset.geo);
     if (t.id === "d-add") return addPerson();
     if (t.dataset.dm) { S.draft.modes[t.dataset.dm] = !S.draft.modes[t.dataset.dm]; return renderAdd(); }
-    if (t.closest("#suggest") && t.dataset.i !== undefined) {
-      const f = sugg[+t.dataset.i]; $("suggest").hidden = true;
-      return setDraftPosition(f.geometry.coordinates[1], f.geometry.coordinates[0], f.properties.label);
+    if (t.closest(".suggest") && t.dataset.s !== undefined) {
+      const m = stnPool[+t.dataset.s], box = t.closest(".searchbox"); t.closest(".suggest").hidden = true;
+      return setPos(box.dataset.ak, m.st[2], m.st[3], m.st[1] + (m.kind === "bus" ? " (bus stop)" : " (station)"));
+    }
+    if (t.closest(".suggest") && t.dataset.i !== undefined) {
+      const f = sugg[+t.dataset.i], box = t.closest(".searchbox"); t.closest(".suggest").hidden = true;
+      return setPos(box.dataset.ak, f.geometry.coordinates[1], f.geometry.coordinates[0], f.properties.label);
     }
     if (t.classList.contains("res")) return select(+t.dataset.k);
     const li = t.closest(".person"); const p = li && S.ev.people.find((x) => x.id === li.dataset.pid);
@@ -433,11 +514,15 @@
       readOpt(t, o); return S.ev ? (renderOpts(), saveOptionsSoon(), scheduleSolve()) : (document.getElementById("home-opts").innerHTML = optionsHTML(S.draftOpts, true));
     }
   });
+  view.addEventListener("focusin", async (e) => {         // bus stops are a big file: only fetched when someone starts a station search
+    if (e.target.dataset && e.target.dataset.stn !== undefined && !graphBus) { try { graphBus = await (await fetch("data/graph-bus.json")).json(); } catch (err) { /* rail stations still work */ } }
+  });
   view.addEventListener("input", (e) => {
     const t = e.target;
     if (t.id === "f-title") S.title = t.value;
-    else if (t.id === "d-name") { S.draft.name = t.value; const b = $("d-add"); if (b) b.disabled = !(S.draft.lat !== null && t.value.trim()); }
-    else if (t.id === "d-addr") suggest(t.value.trim());
+    else if (t.id === "d-name") { S.draft.name = t.value; const b = $("d-add"); if (b) b.disabled = !canAdd(); }
+    else if (t.dataset.stn !== undefined) suggestStations(t.value.trim(), t.parentNode.querySelector(".suggest"));
+    else if (t.dataset.addr !== undefined) suggest(t.value.trim(), t.parentNode.querySelector(".suggest"));
     else if (t.id === "ev-title" && S.admin) { S.ev.title = t.value; saveOptionsSoon(); }
     else if (t.dataset.opt && t.type === "range") {      // live label while dragging, apply on release
       const o = S.ev ? S.ev.options : S.draftOpts; readOpt(t, o);
@@ -446,7 +531,11 @@
   });
   view.addEventListener("change", (e) => {
     const t = e.target;
-    if (t.dataset.opt) {
+    if (t.dataset.retsw !== undefined) {                 // way back to a different address, for an existing person
+      const p = S.ev.people.find((x) => x.id === t.closest(".person").dataset.pid); if (!p) return;
+      p.ret = t.checked ? { addr: p.addr, lat: p.lat, lon: p.lon } : null; renderPeople(); savePerson(p);
+    } else if (t.dataset.dretsw !== undefined) { S.draft.retOn = t.checked; renderAdd(); renderDraftMarkers(); }
+    else if (t.dataset.opt) {
       const o = S.ev ? S.ev.options : S.draftOpts; if (S.ev && !S.admin) return;
       readOpt(t, o); if (S.ev) { saveOptionsSoon(); scheduleSolve(); renderOpts(); }
     } else if (t.dataset.f) {
@@ -455,12 +544,12 @@
     }
   });
 
-  function geolocate() {
+  function geolocate(ak) {
     if (!navigator.geolocation) return notice("Location is not available in this browser.", "warn");
     navigator.geolocation.getCurrentPosition((pos) => {
       const { latitude: la, longitude: lo } = pos.coords;
       if (la < 47.9 || la > 49.5 || lo < 1.2 || lo > 3.9) return notice("Your location is outside Île-de-France.", "warn");
-      setDraftPosition(la, lo, "");
+      setPos(ak, la, lo, "");
     }, () => notice("Could not get your location. Type an address instead.", "warn"), { timeout: 8000 });
   }
   async function createEvent() {
@@ -473,12 +562,12 @@
   function go(id) { history.pushState(null, "", id ? "?e=" + id : location.pathname); route(); }
   addEventListener("popstate", route);
   async function route() {
-    notice(""); setPicking(false);
+    notice(""); setPicking(null);
     const q = new URLSearchParams(location.search), id = q.get("e");
     if (id && q.get("k")) { setLocal(id, { admin: q.get("k") }); history.replaceState(null, "", "?e=" + id); }
     return id ? openEvent(id) : showHome();
   }
-  document.addEventListener("click", (e) => { const b = $("suggest"); if (b && !b.contains(e.target) && e.target.id !== "d-addr") b.hidden = true; });
+  document.addEventListener("click", (e) => document.querySelectorAll(".suggest").forEach((b) => { if (!b.parentNode.contains(e.target)) b.hidden = true; }));
 
   /* ---------- boot ---------- */
   (async function () {
@@ -486,9 +575,7 @@
     loadBasemap(); renderLegend();
     const ping = await Api.ping(); S.api = ping.ok;
     try {
-      const [g, rest] = await Promise.all([fetch("data/graph.json").then((r) => r.json()), fetch("data/restaurants.json").then((r) => (r.ok ? r.json() : null)).catch(() => null)]);
-      graphBase = g; base.setStations(g);
-      if (rest) restaurants = Int32Array.from(g.stations, (s) => rest[s[0]] || 0);
+      graphBase = await fetch("data/graph.json").then((r) => r.json()); base.setStations(graphBase);
     } catch (e) { notice("Could not load data/graph.json. Run tools/build_graph.py first.", "warn"); }
     await route();
     if (!S.api) notice(`Can't reach the event server (${ping.why}). Serve this folder with PHP (see README). If it is running, a content blocker may be blocking api/meetup.php.`, "warn");

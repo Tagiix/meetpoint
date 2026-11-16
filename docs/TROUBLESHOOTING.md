@@ -9,7 +9,6 @@ Always start with `tools/smoke_test.sh <base-url>`. Its first FAIL line is usual
 | Create works but the next page says "Event not found" | Events were written somewhere else than where they are read (two copies of the app, or a different document root) | Use one install; check `data/events/` of that install |
 | `smoke_test.sh`: "event file is readable over the web" | A web server is serving PHP files as text (PHP not enabled for that path) | Enable PHP for `/data/` too, or add `location ^~ /data/events/ { deny all; }` |
 | Map shows rail lines on a blank background | `data/roads*.json`, `water.json`, `green.json`, `places.json` or `pois.json` are missing (not deployed) | Restore them from the repo; see docs/DATA.md |
-| "Prefer places with restaurants" slider disabled, "(data not built yet)" | `data/restaurants.json` missing | Restore from the repo, or rebuild with `tools/build_osm.py` |
 | Turning on buses says "Could not load the bus network" | `data/graph-bus.json` is missing, or it was built for another `graph.json` | Restore both files from the same commit, or rebuild: `tools/build_graph.py` then `tools/build_bus.py` |
 | Everything loads slowly | JSON not compressed | Enable gzip/deflate for `application/json` (Apache: the repo `.htaccess` does it; nginx: see docs/DEPLOY.md) |
 | Address search finds nothing, "Locating…" lasts a few seconds | api-adresse.data.gouv.fr is slow or unreachable from the browser | Wait; the app gives up after 4–5 s and uses "Dropped pin". Positions can also be placed by clicking the map |
