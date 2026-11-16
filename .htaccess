@@ -1,6 +1,14 @@
+DirectoryIndex index.php index.html
 # Apache: compress the data file, allow caching of the static graph for a day
 <IfModule mod_deflate.c>
   AddOutputFilterByType DEFLATE application/json text/css application/javascript
+</IfModule>
+# scripts, styles and the page itself: the browser must check with the server on every load (cheap 304 when unchanged),
+# so an update can never be mixed with old files. The big data files may be cached for a day.
+<IfModule mod_headers.c>
+  <FilesMatch "\.(js|css|html)$">
+    Header set Cache-Control "no-cache"
+  </FilesMatch>
 </IfModule>
 <IfModule mod_expires.c>
   ExpiresActive On

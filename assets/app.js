@@ -15,7 +15,7 @@
 
   /* ---------- state ---------- */
   const S = { api: true, ev: null, admin: null, mine: {}, draftOpts: Object.assign({}, DEFAULT_OPTS), title: "", draft: blankDraft(), editing: null, picking: null };            // picking: which address field the next map click fills (see addrField)
-  let graphBase = null, graphBus = null, nets = {}, result = null, selected = 0, token = 0, lastSig = "", pollTimer = null;
+  let graphBase = null, nets = {}, result = null, selected = 0, token = 0, lastSig = "", pollTimer = null;
   let markers = [], draftMarkers = [], dirn = "out", curRoutes = null, targetMarker = null, solveTimer = null, optTimer = null, sugg = [], suggTimer = null;
 
   function blankDraft() { return { name: "", addr: "", lat: null, lon: null, modes: Object.assign({}, DEFAULT_MODES), retOn: false, ret: { addr: "", lat: null, lon: null } }; }
@@ -27,7 +27,7 @@
   function setLocal(id, patch) { const s = store(); s.events[id] = Object.assign(getLocal(id), patch); putStore(s); }
 
   /* ---------- map ---------- */
-  const map = L.map("map", { zoomControl: true, zoomAnimation: false, zoomSnap: 0.5, minZoom: 9, maxZoom: 17, maxBounds: [[47.8, 1.1], [49.7, 4.0]] }).setView([48.8566, 2.3522], 11);
+  const map = L.map("map", { zoomControl: true, zoomSnap: 0.5, minZoom: 9, maxZoom: 17, maxBounds: [[47.8, 1.1], [49.7, 4.0]] }).setView([48.8566, 2.3522], 11);
   map.attributionControl.setPrefix(false);
   map.attributionControl.addAttribution("Data © Île-de-France Mobilités, OpenStreetMap contributors");
   const base = new Basemap(map);
@@ -50,26 +50,28 @@
     return best;
   }
   /* station search: rail stations, plus bus stops once the bus data is loaded */
-  const plain = (x) => x.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-  let stnPool = null;
+  const plain = (x) => x.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[’'‘`´-]+/g, " ").replace(/\s+/g, " ").trim();
   function stationMatches(q) {
-    const n = plain(q), out = [], seen = new Set();
+    const n = plain(q), nsp = n.replace(/ /g, ""), out = [], seen = new Set();
     const R = graphBase ? (graphBase.railCount || graphBase.stations.length) : 0;
     const all = graphBase ? graphBase.stations.slice(0, R).map((st) => [st, "rail"]).concat(graphBus ? graphBus.stations.map((st) => [st, "bus"]) : []) : [];
     for (const [st, kind] of all) {
-      const nm = plain(st[1]); if (!nm.includes(n)) continue;
+      const nm = plain(st[1]); if (!nm.includes(n) && !nm.replace(/ /g, "").includes(nsp)) continue;   // also "gare de lest" for "Gare de l'Est"
       const key = kind + nm + Math.round(st[2] * 200) + Math.round(st[3] * 200); if (seen.has(key)) continue; seen.add(key);
       out.push({ st, kind, rank: (nm.startsWith(n) ? 0 : 1) + (kind === "bus" ? 2 : 0) });
     }
-    return out.sort((a, b) => a.rank - b.rank || a.st[1].length - b.st[1].length).slice(0, 6);
-  }
-  function suggestStations(q, box) {
-    if (q.length < 2) return (box.hidden = true);
-    stnPool = stationMatches(q);
-    box.innerHTML = stnPool.map((m, i) => `<li data-s="${i}">${esc(m.st[1])} <span class="muted small">${m.kind === "bus" ? "bus stop" : "station"}</span></li>`).join(""); box.hidden = !stnPool.length;
+    return out.sort((a, b) => a.rank - b.rank || a.st[1].length - b.st[1].length);
   }
   const MODE_W = { 0: 2.2, 1: 3.6, 2: 3.4, 3: 2 };
-  const getJson = (name) => fetch(`data/${name}.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  const BUILD = window.MP_BUILD || "";                  // stamped into the page by index.php
+  const dataUrl = (name) => `data/${name}.json` + (BUILD ? "?v=" + BUILD : "");   // new build = new URL = never an old cached file
+  const getJson = (name) => fetch(dataUrl(name)).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  /* Everything the map needs is fetched once, when the page opens. The first picture needs only the core files; the rest
+     (secondary and tertiary roads, bus lines, the bus network for routing) arrives behind it without blocking anything. */
+  const later = () => new Promise((r) => setTimeout(r, 0));
+  async function addChunked(layer, flats, style) {       // build thousands of lines in slices so the page keeps responding
+    for (let i = 0; i < flats.length; i += 1500) { base.addLines(layer, flats.slice(i, i + 1500), style); await later(); }
+  }
   async function loadBasemap() {
     const [rail, roads, water, green, places, pois] = await Promise.all(["rail-lines", "roads", "water", "green", "places", "pois"].map(getJson));
     if (green) { base.addPolys("green", green.polys, {}); base.setParkNames(green.names || []); }
@@ -79,20 +81,13 @@
     if (rail) for (const l of rail) base.addLines("rail", l.p, { color: l.c, w: MODE_W[l.m], mode: l.m });
     if (places) base.setPlaces(places);
     base.draw();
-    if (map.getZoom() >= 12) ensureDetailRoads();
+    const [detail, bus] = await Promise.all([getJson("roads-detail"), getJson("bus-lines")]);   // downloads run together, building one after the other
+    if (detail) { await addChunked("roads", detail.secondary || [], { tier: 2 }); await addChunked("roads", detail.tertiary || [], { tier: 3 }); base.draw(); }
+    if (bus) { for (const l of bus) base.addLines("bus", l.p, {}); await later(); base.draw(); }
+    ensureBusGraph().then(() => getNet({ profile: 0, buses: true })).catch(() => {});    // so turning buses on later is instant
   }
-  let detailLoaded = false;                              // secondary and tertiary roads: bigger file, only needed zoomed in
-  async function ensureDetailRoads() {
-    if (detailLoaded) return; detailLoaded = true;
-    const r = await getJson("roads-detail");
-    if (r) { base.addLines("roads", r.secondary || [], { tier: 2 }); base.addLines("roads", r.tertiary || [], { tier: 3 }); base.draw(); }
-  }
-  map.on("zoomend", () => { if (map.getZoom() >= 12) ensureDetailRoads(); });
-  let busLoaded = false;
-  async function ensureBusLines() {
-    if (busLoaded) return; busLoaded = true;
-    try { for (const l of await (await fetch("data/bus-lines.json")).json()) base.addLines("bus", l.p, {}); } catch (e) { busLoaded = false; }
-  }
+  let graphBus = null;
+  async function ensureBusGraph() { return graphBus || (graphBus = await (await fetch(dataUrl("graph-bus"))).json()); }
 
   function renderLegend() {
     const el = $("legend"); el.hidden = false;
@@ -102,7 +97,7 @@
       <label><input type="checkbox" id="lg-bus" ${base.show.bus ? "checked" : ""}> Bus lines</label>`;
     $("lg-food").onchange = (e) => { base.show.food = e.target.checked; base.draw(); };
     $("lg-roads").onchange = (e) => { base.show.roads = e.target.checked; base.draw(); };
-    $("lg-bus").onchange = async (e) => { base.show.bus = e.target.checked; if (e.target.checked) await ensureBusLines(); base.draw(); };
+    $("lg-bus").onchange = (e) => { base.show.bus = e.target.checked; base.draw(); };
   }
 
   function targetPoint() { const st = result.net.graph.stations[result.top[selected].c]; return [st[2], st[3]]; }
@@ -157,7 +152,7 @@
 
   /* ---------- views ---------- */
   function showHome() {
-    clearInterval(pollTimer); S.ev = null; S.admin = null; S.mine = {}; S.editing = null; S.draft = blankDraft();
+    clearTimeout(pollTimer); S.ev = null; S.admin = null; S.mine = {}; S.editing = null; S.draft = blankDraft();
     document.title = "Meet Point"; clearResult(); renderMarkers(); renderDraftMarkers();
     const evs = Object.entries(store().events).filter(([, e]) => e.title);
     $("view").innerHTML = `
@@ -182,7 +177,7 @@
       <section id="v-opts"><h2>Settings</h2><div class="card" id="opts-body"></div></section>
       ${S.admin ? '<section><button id="del" class="btn danger sm" style="align-self:flex-start">Delete this event</button></section>' : ""}`;
     renderHead(); renderPeople(); renderAdd(); renderOpts();
-    clearInterval(pollTimer); pollTimer = setInterval(poll, 10000);
+    idle = 0; nextPoll();
   }
   function renderHead() {
     $("v-head").innerHTML = `
@@ -314,15 +309,31 @@
     const was = S.picking; S.picking = ak; document.body.classList.toggle("picking", !!ak);
     if (S.ev && was !== ak) { renderAdd(); renderPeople(); }
   }
-  function suggest(q, box) {
-    clearTimeout(suggTimer);
-    if (q.length < 3) return (box.hidden = true);
+  /* Suggestion dropdown. Each entry: {label, tag, lat, lon, addr}. Stations are matched here, instantly, ignoring case, accents and
+     apostrophes; addresses come from the national address service. Keyboard: Up/Down, Tab/Shift+Tab, Enter picks (the first one if none is
+     highlighted), Escape closes. */
+  const stationItem = (m) => ({ label: m.st[1], tag: m.kind === "bus" ? "bus stop" : "station", lat: m.st[2], lon: m.st[3], addr: m.st[1] + (m.kind === "bus" ? " (bus stop)" : " (station)") });
+  function showSuggestions(box, items) {
+    box._items = items; box._active = -1;
+    box.innerHTML = items.map((it, i) => `<li data-i="${i}">${esc(it.label)}${it.tag ? ` <span class="muted small">${it.tag}</span>` : ""}</li>`).join(""); box.hidden = !items.length;
+  }
+  function highlight(box, k) {
+    box._active = k;
+    [...box.children].forEach((li, i) => { li.classList.toggle("on", i === k); if (i === k) li.scrollIntoView({ block: "nearest" }); });
+  }
+  function pickSuggestion(box, it) { box.hidden = true; setPos(box.closest(".searchbox").dataset.ak, it.lat, it.lon, it.addr); }
+  function suggest(q, box, stationsOnly) {
+    clearTimeout(suggTimer); box._q = q;
+    const stations = q.length >= 2 ? stationMatches(q).slice(0, stationsOnly ? 6 : 3).map(stationItem) : [];
+    if (stationsOnly || q.length < 3) return showSuggestions(box, stations);
+    showSuggestions(box, stations);                       // stations appear at once, addresses follow
     suggTimer = setTimeout(async () => {
       try {
         const r = await (await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q)}&limit=6&lat=48.85&lon=2.35`, { signal: AbortSignal.timeout(5000) })).json();
-        sugg = r.features.filter((f) => IDF.test(f.properties.postcode || "")).slice(0, 5);
-        box.innerHTML = sugg.map((f, i) => `<li data-i="${i}">${esc(f.properties.label)}</li>`).join(""); box.hidden = !sugg.length;
-      } catch (e) { box.hidden = true; }
+        if (box._q !== q) return;                         // the text changed meanwhile
+        const addrs = r.features.filter((f) => IDF.test(f.properties.postcode || "")).slice(0, 5).map((f) => ({ label: f.properties.label, lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0], addr: f.properties.label }));
+        showSuggestions(box, stations.concat(addrs));
+      } catch (e) { /* the stations already shown stay */ }
     }, 220);
   }
 
@@ -365,17 +376,26 @@
     S.mine = Object.fromEntries(Object.entries(S.mine).filter(([pid]) => S.ev.people.some((p) => p.id === pid)));
     renderPeople(); renderAdd(); renderOpts(); renderHead(); scheduleSolve();
   }
+  /* The server is asked for changes every 10 s, then every 20 s and 40 s while nothing happens; any click or edit goes back to 10 s.
+     Hidden tabs do not poll at all and catch up the moment they are shown again. */
+  let idle = 0;
+  function nextPoll() { clearTimeout(pollTimer); pollTimer = setTimeout(poll, idle < 6 ? 10000 : idle < 18 ? 20000 : 40000); }
   async function poll() {
-    if (!S.ev || document.hidden || optTimer) return;
+    if (!S.ev || document.hidden) return;
+    if (optTimer) return nextPoll();
     const focus = document.activeElement, inside = (sel) => focus && focus.closest && focus.closest(sel);
     try {
-      const e = await Api.get(S.ev.id, S.ev.rev); if (e.unchanged) return;
+      const e = await Api.get(S.ev.id, S.ev.rev); if (e.unchanged) { idle++; return nextPoll(); }
+      idle = 0;
       S.ev = e; S.mine = Object.fromEntries(Object.entries(S.mine).filter(([pid]) => e.people.some((p) => p.id === pid)));
       if (!inside(".more")) renderPeople();            // keep the edit panel alone while someone types in it
       if (!inside("#opts-body")) renderOpts();
       renderAddIfNeeded(); scheduleSolve();
-    } catch (err) { if (/not found/.test(err.message)) { notice("This event was deleted.", "warn"); showHome(); } }
+    } catch (err) { if (/not found/.test(err.message)) { notice("This event was deleted.", "warn"); return showHome(); } }
+    nextPoll();
   }
+  document.addEventListener("visibilitychange", () => { if (S.ev && !document.hidden) { idle = 0; clearTimeout(pollTimer); poll(); } });
+  document.addEventListener("pointerdown", () => { idle = 0; });
 
   /* ---------- solving and results ---------- */
   async function getNet(o) {
@@ -383,7 +403,7 @@
     if (nets[key]) return nets[key];
     let g = graphBase;
     if (o.buses) {
-      if (!graphBus) { notice("Loading the bus network…"); graphBus = await (await fetch("data/graph-bus.json")).json(); notice(""); }
+      if (!graphBus) { notice("Loading the bus network…"); await ensureBusGraph(); notice(""); }
       g = MP.mergeGraph(graphBase, graphBus);
     }
     return (nets[key] = new MP.Network(g, o.profile));
@@ -439,8 +459,9 @@
     if (targetMarker) targetMarker.remove();
     targetMarker = L.marker(target, { icon: L.divIcon({ className: "", html: '<div class="target">★</div>', iconSize: [34, 34], iconAnchor: [17, 17] }), zIndexOffset: 1000 }).addTo(map).bindTooltip(st[1], { direction: "top", offset: [0, -18] });
     fitView();
-    $("player").hidden = false; flow.setRoutes(curRoutes[dirn], target); flow.play();
+    $("player").hidden = false; flow.setRoutes(curRoutes[dirn], target);   // shown paused: the animation starts on Play, not by itself
     loadPlaces(st);
+    await new Promise((r) => setTimeout(r, 500)); if (my !== token) return;      // skip the lookups while someone is clicking through the cards
     await refine(out.concat(back || []), my);          // real street geometry for walk/bike/car legs
     if (my !== token) return;
     const wasPlaying = flow.playing, t = flow.t / (flow.T || 1);
@@ -451,17 +472,26 @@
     r.max = Math.max(...r.times, ...r.back); r.sum = r.times.concat(r.back).reduce((a, b) => a + b, 0);
     renderCards();
   }
+  const streets = new Map();                           // street routes already fetched, by mode and end points
+  const legKey = (leg) => leg.mode + ":" + leg.coords[0].map((x) => x.toFixed(5)) + ">" + leg.coords[leg.coords.length - 1].map((x) => x.toFixed(5));
   const OSRM = { walk: "routed-foot", bike: "routed-bike", car: "routed-car" };
   async function refine(routes, my) {
     const jobs = [];
-    for (const rt of routes) for (const leg of rt.legs) if (OSRM[leg.mode] && leg.label === leg.mode) jobs.push(leg);
+    for (const rt of routes) for (const leg of rt.legs) if (OSRM[leg.mode] && leg.label === leg.mode) {
+      const hit = streets.get(legKey(leg));                // same trip seen before: no request
+      if (hit) { leg.coords = hit.coords.slice(); leg.sec = hit.sec; } else jobs.push(leg);
+    }
     let next = 0;
     const worker = async () => {
       while (next < jobs.length && my === token) {
         const leg = jobs[next++], [a, b] = leg.coords;
         try {
           const j = await (await fetch(`https://routing.openstreetmap.de/${OSRM[leg.mode]}/route/v1/driving/${a[1]},${a[0]};${b[1]},${b[0]}?overview=full&geometries=geojson`)).json(), rte = j.routes && j.routes[0];
-          if (rte) { leg.coords = rte.geometry.coordinates.map((c) => [c[1], c[0]]); leg.sec = rte.duration + (leg.mode === "bike" ? 180 : leg.mode === "car" ? 480 : 0); }
+          if (rte) {
+            const key = legKey(leg);
+            leg.coords = rte.geometry.coordinates.map((c) => [c[1], c[0]]); leg.sec = rte.duration + (leg.mode === "bike" ? 180 : leg.mode === "car" ? 480 : 0);
+            streets.set(key, { coords: leg.coords.slice(), sec: leg.sec });
+          }
         } catch (e) { /* keep the straight-line estimate */ }
       }
     };
@@ -472,7 +502,7 @@
   }
   $("play").onclick = () => (flow.playing ? flow.pause() : flow.play());
   $("seek").oninput = () => { flow.pause(); flow.seek($("seek").value / 1000); };
-  $("dir").onchange = () => { dirn = $("dir").value; if (!curRoutes) return; flow.setRoutes(curRoutes[dirn] || curRoutes.out, [0, 0]); flow.play(); };
+  $("dir").onchange = () => { dirn = $("dir").value; if (!curRoutes) return; flow.setRoutes(curRoutes[dirn] || curRoutes.out, [0, 0]); };
   $("speed").onchange = () => { flow.speed = +$("speed").value; };
 
   function loadPlaces(st) {                              // from the local OpenStreetMap data: no network, instant
@@ -496,14 +526,7 @@
     if (t.dataset.geo) return geolocate(t.dataset.geo);
     if (t.id === "d-add") return addPerson();
     if (t.dataset.dm) { S.draft.modes[t.dataset.dm] = !S.draft.modes[t.dataset.dm]; return renderAdd(); }
-    if (t.closest(".suggest") && t.dataset.s !== undefined) {
-      const m = stnPool[+t.dataset.s], box = t.closest(".searchbox"); t.closest(".suggest").hidden = true;
-      return setPos(box.dataset.ak, m.st[2], m.st[3], m.st[1] + (m.kind === "bus" ? " (bus stop)" : " (station)"));
-    }
-    if (t.closest(".suggest") && t.dataset.i !== undefined) {
-      const f = sugg[+t.dataset.i], box = t.closest(".searchbox"); t.closest(".suggest").hidden = true;
-      return setPos(box.dataset.ak, f.geometry.coordinates[1], f.geometry.coordinates[0], f.properties.label);
-    }
+    if (t.closest(".suggest") && t.dataset.i !== undefined) { const box = t.closest(".suggest"); return pickSuggestion(box, box._items[+t.dataset.i]); }
     if (t.classList.contains("res")) return select(+t.dataset.k);
     const li = t.closest(".person"); const p = li && S.ev.people.find((x) => x.id === li.dataset.pid);
     if (p && t.dataset.act === "edit") { S.editing = S.editing === p.id ? null : p.id; return renderPeople(); }
@@ -515,13 +538,24 @@
     }
   });
   view.addEventListener("focusin", async (e) => {         // bus stops are a big file: only fetched when someone starts a station search
-    if (e.target.dataset && e.target.dataset.stn !== undefined && !graphBus) { try { graphBus = await (await fetch("data/graph-bus.json")).json(); } catch (err) { /* rail stations still work */ } }
+    if (e.target.dataset && e.target.dataset.stn !== undefined && !graphBus) { try { await ensureBusGraph(); } catch (err) { /* rail stations still work */ } }
+  });
+  view.addEventListener("keydown", (e) => {              // keyboard use of the suggestion dropdowns
+    const t = e.target; if (t.dataset.addr === undefined && t.dataset.stn === undefined) return;
+    const box = t.parentNode.querySelector(".suggest"), n = box._items ? box._items.length : 0;
+    if (box.hidden || !n) return;
+    const back = e.key === "ArrowUp" || (e.key === "Tab" && e.shiftKey), fwd = e.key === "ArrowDown" || (e.key === "Tab" && !e.shiftKey), a = box._active;
+    if (fwd && !(e.key === "Tab" && a === n - 1)) { e.preventDefault(); highlight(box, (a + 1) % n); }      // Tab leaves the field after the last entry
+    else if (back && !(e.key === "Tab" && a <= 0)) { e.preventDefault(); highlight(box, a <= 0 ? n - 1 : a - 1); }
+    else if (e.key === "Enter") { e.preventDefault(); pickSuggestion(box, box._items[a >= 0 ? a : 0]); }
+    else if (e.key === "Escape") { box.hidden = true; }
+    else if (e.key === "Tab") box.hidden = true;
   });
   view.addEventListener("input", (e) => {
     const t = e.target;
     if (t.id === "f-title") S.title = t.value;
     else if (t.id === "d-name") { S.draft.name = t.value; const b = $("d-add"); if (b) b.disabled = !canAdd(); }
-    else if (t.dataset.stn !== undefined) suggestStations(t.value.trim(), t.parentNode.querySelector(".suggest"));
+    else if (t.dataset.stn !== undefined) suggest(t.value.trim(), t.parentNode.querySelector(".suggest"), true);
     else if (t.dataset.addr !== undefined) suggest(t.value.trim(), t.parentNode.querySelector(".suggest"));
     else if (t.id === "ev-title" && S.admin) { S.ev.title = t.value; saveOptionsSoon(); }
     else if (t.dataset.opt && t.type === "range") {      // live label while dragging, apply on release
@@ -569,13 +603,48 @@
   }
   document.addEventListener("click", (e) => document.querySelectorAll(".suggest").forEach((b) => { if (!b.parentNode.contains(e.target)) b.hidden = true; }));
 
+  /* ---------- full reload: fetch every file past the browser cache, then reload ---------- */
+  const DATA_FILES = ["graph", "graph-bus", "rail-lines", "bus-lines", "roads", "roads-detail", "water", "green", "places", "pois"];
+  async function hardReload() {
+    notice("Re-downloading everything…");
+    const urls = [location.pathname, "index.html"].concat(
+      [...document.querySelectorAll("script[src], link[rel=stylesheet]")].map((el) => el.src || el.href).filter((u) => u.startsWith(location.origin)),
+      DATA_FILES.map(dataUrl));
+    // cache:"reload" asks the server for a fresh copy and replaces what the browser had stored
+    await Promise.all(urls.map((u) => fetch(u, { cache: "reload" }).catch(() => null)));
+    try { for (const k of await caches.keys()) await caches.delete(k); } catch (e) { /* no Cache Storage here */ }
+    location.reload();                                  // localStorage (organizer keys, own entries) is deliberately left alone
+  }
+  $("hard-reload").onclick = hardReload;
+
+  /* ---------- updates: the page reloads itself when the server has a new build ---------- */
+  async function checkUpdate() {
+    if (!BUILD || document.hidden) return;
+    try {
+      const j = await (await fetch("api/build.php", { cache: "no-store" })).json();
+      if (!j.build || j.build === BUILD) return;
+      let tried = null; try { tried = sessionStorage.getItem("meetpoint:reloaded"); } catch (e) {}
+      if (tried === j.build) return notice('A new version is installed, but this browser still shows the old one. Use "Reload everything" below.', "warn");   // never loop
+      const f = document.activeElement, typing = f && /^(INPUT|TEXTAREA|SELECT)$/.test(f.tagName) && f.closest("#view");
+      if (typing || (S.draft && (S.draft.name || S.draft.lat !== null))) {          // do not throw away what someone is filling in
+        notice("A new version is available. Finish what you are doing, then ", "warn");
+        const b = document.createElement("button"); b.className = "link"; b.textContent = "reload"; b.onclick = () => location.reload(); $("notice").append(b); return;
+      }
+      try { sessionStorage.setItem("meetpoint:reloaded", j.build); } catch (e) {}
+      location.reload();
+    } catch (e) { /* offline or server busy: try again later */ }
+  }
+  setInterval(checkUpdate, 60000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) checkUpdate(); });
+  window.__meetpointCheckUpdate = checkUpdate;           // for the tests
+
   /* ---------- boot ---------- */
   (async function () {
     base.setStations({ stations: [], lnodes: [] });
     loadBasemap(); renderLegend();
     const ping = await Api.ping(); S.api = ping.ok;
     try {
-      graphBase = await fetch("data/graph.json").then((r) => r.json()); base.setStations(graphBase);
+      graphBase = await fetch(dataUrl("graph")).then((r) => r.json()); base.setStations(graphBase);
     } catch (e) { notice("Could not load data/graph.json. Run tools/build_graph.py first.", "warn"); }
     await route();
     if (!S.api) notice(`Can't reach the event server (${ping.why}). Serve this folder with PHP (see README). If it is running, a content blocker may be blocking api/meetup.php.`, "warn");

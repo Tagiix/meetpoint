@@ -42,7 +42,19 @@ minimize the longest trip, restaurants nearby), a nice flow animation, and the *
 - **Route visibility**: planned routes are dotted with a white halo, the travelled part is thick and solid (walking stays dotted).
 - Tests: solver tests cover the scores and the way back; the e2e test covers organizer editing, station search and the way back.
 
+## Round 4: speed
+- Measured first (headless Chromium, forced canvas readback). Replaced the single big canvas by cached tiles (`GridLayer`): drag worst frame 50 → 33 ms (0 dropped frames over cached tiles),
+  zoom first frame 43–71 → 13–26 ms with Leaflet's zoom animation back, tiles fill in within ~110 ms without blocking.
+- Everything loads at start (~0.3 s to a map, ~0.6 s to complete on localhost). The animation no longer starts by itself. OSRM lookups are debounced and cached, polling backs off.
+- "Reload everything" button (footer): refetches the app and data past the browser cache; `.htaccess` makes scripts and styles revalidate on every load.
+- Web research (web.dev, OpenLayers, canvas map write-ups) agreed: pre-render and blit, keep work under 50 ms per task, use workers only for tasks above ~20 ms. Our biggest remaining task is
+  solving with buses (~250 ms); a worker would help there, not done yet.
+- **Automatic updates.** `index.php` stamps every asset and data URL with a build id (hash of file sizes and mtimes, `api/_build.inc.php`); the open page asks `api/build.php` every minute and when the
+  tab is shown again, and reloads itself on a change (it waits, with a "reload" link, if someone is typing or has a half-filled form; a sessionStorage guard prevents reload loops). No build step, any PHP server.
+- **Address dropdown**: stations (rail, and bus stops once loaded) are matched locally and shown instantly above the address results, ignoring case, accents, apostrophes and spaces; keyboard: arrows, Tab/Shift+Tab, Enter (first entry if none highlighted), Escape.
+
 ## Not done / ideas
+- **Next step: solve in a Web Worker.** Solving with buses on takes ~250 ms on the page's own thread (rail only: ~10 ms), freezing the page on every change. `assets/solver.js` is pure, so it can run in a worker: the graph and `Network` would live there, the page sends people and options and gets the ranking back, and asks the worker for the itinerary of the selected result (it is rebuilt from the solver's internal Dijkstra data). Needs: message plumbing both ways, a fallback to the main thread if the worker fails to start, tests. Worth doing if buses-on is used a lot.
 - Meeting points other than stations (squares, parks, restaurants themselves).
 - Live traffic and real-time departures; PRIM/Navitia API integration for exact journeys.
 - Activity filter (parks, culture, cinemas) beyond food and drink; French interface.

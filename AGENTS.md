@@ -27,9 +27,10 @@ Node: `node --check assets/*.js`. PHP: `php -l api/meetup.php`.
 ## Layout
 | Path | Role |
 |---|---|
-| `index.html` | single page shell; loads scripts in order: Leaflet (CDN), solver, flow, basemap, api, app |
+| `index.php` | single page shell (PHP only to stamp `?v=<build id>` on every asset URL); scripts in order: Leaflet (CDN), solver, flow, basemap, api, app |
+| `api/build.php`, `api/_build.inc.php` | build id = hash of file sizes and mtimes; the open page polls it every minute and reloads itself on a change |
 | `assets/solver.js` | pure functions (browser and node): graph routing (Dijkstra per person), multi-person scoring, itinerary legs |
-| `assets/basemap.js` | canvas map under Leaflet: parks, water, roads, rail, bus, stations, labels, restaurant dots/glow |
+| `assets/basemap.js` | cached canvas tiles (Leaflet GridLayer): parks, water, roads, rail, bus, restaurant dots/glow; plus a label/station overlay |
 | `assets/flow.js` | travel animation canvas (shared clock, waiting rings, arrival pulses) |
 | `assets/app.js` | all UI state and rendering, event polling, address search, OSRM street routes |
 | `assets/api.js` | client for `api/meetup.php` |

@@ -69,3 +69,42 @@ const back = MP.reverseLegs(MP.itinerary(net, rf.back[0], t0.c));
 const tot = back.reduce((s, l) => s + (l.wait || 0) + l.sec, 0);
 assert(Math.abs(tot - rf.back[0].sec[t0.c]) < 1, "return legs add up");
 console.log("scoring and way-back ok");
+
+// ---- the minimizers really minimize: independent brute force over every station ----
+// Recomputes each station's score from raw per-person times (never through solve()) for random groups,
+// mixed modes, weights and way-back addresses, and demands the solver's best equals the true minimum.
+{
+  let seed = 5; const rnd = () => (seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296;
+  const pt = () => { const s = g.stations[Math.floor(rnd() * net.R)]; return [s[2] + (rnd() - .5) * .01, s[3] + (rnd() - .5) * .012]; };
+  const MODES = [{ walk: true, transit: true }, { walk: true, transit: true, bike: true }, { walk: true, transit: true, car: true }, { transit: true }, { walk: true }, { car: true }];
+  const score = {
+    sum: (t, w) => t.reduce((s, x, i) => s + x * w[i], 0) / w.reduce((a, b) => a + b, 0),
+    max: (t) => Math.max(...t),
+    balanced: (t, w) => Math.sqrt(t.reduce((s, x, i) => s + x * x * w[i], 0) / w.reduce((a, b) => a + b, 0)),
+  };
+  let checked = 0;
+  for (let it = 0; it < 120; it++) {
+    const k = 2 + Math.floor(rnd() * 4), ppl = [];
+    for (let i = 0; i < k; i++) {
+      const [la, lo] = pt(), r = pt();
+      ppl.push({ lat: la, lon: lo, weight: 1 + Math.floor(rnd() * 3), modes: Object.assign({ walk: false, transit: false, bike: false, car: false }, MODES[Math.floor(rnd() * MODES.length)]), ret: rnd() < .3 ? { lat: r[0], lon: r[1] } : null });
+    }
+    const A = ppl.map(p => MP.personTimes(net, p)), B = ppl.map((p, i) => p.ret ? MP.personTimes(net, Object.assign({}, p, p.ret)) : A[i]);
+    const w = ppl.map(p => p.weight).concat(ppl.map(p => p.weight));
+    for (const obj of ["sum", "max", "balanced"]) {
+      const r = MP.solve(net, ppl, { objective: obj, top: 1 });
+      let best = Infinity;
+      for (let c = 0; c < net.R; c++) {
+        const t = A.map(x => x.sec[c] / 60).concat(B.map(x => x.sec[c] / 60));
+        if (t.some(x => !isFinite(x))) continue;
+        best = Math.min(best, score[obj](t, w));
+      }
+      if (!r.top.length) { assert.strictEqual(best, Infinity); continue; }
+      checked++;
+      // max adds a tiny tie-break, so compare on the real score of the chosen station
+      const tc = A.map(x => x.sec[r.top[0].c] / 60).concat(B.map(x => x.sec[r.top[0].c] / 60));
+      assert(Math.abs(score[obj](tc, w) - best) < (obj === "max" ? 1e-3 : 1e-9), `${obj} is not minimal: ${score[obj](tc, w)} vs ${best}`);
+    }
+  }
+  console.log("brute-force minimality ok:", checked, "checks");
+}

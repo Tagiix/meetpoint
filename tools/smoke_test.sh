@@ -15,6 +15,8 @@ field() { sed -n "s/.*\"$1\":\"\([^\"]*\)\".*/\1/p"; }
 echo "Meet Point smoke test against $BASE"
 echo "[static files]"
 [ "$(code "$BASE/")" = 200 ] && ok "index page" || bad "index page (is the web server running and pointing at this folder?)"
+curl -s --max-time 20 "$BASE/" | grep -q 'assets/app.js?v=' && ok "index.php stamps asset URLs with the build id" || bad "index.php is not being run as PHP (asset URLs have no ?v=): is index.php the directory index?"
+curl -s --max-time 20 "$BASE/api/build.php" | grep -q '"build":"' && ok "api/build.php (update check)" || bad "api/build.php does not answer"
 for f in assets/app.js assets/solver.js assets/basemap.js assets/flow.js assets/api.js assets/style.css data/graph.json data/rail-lines.json; do
   [ "$(code "$BASE/$f")" = 200 ] && ok "$f" || bad "$f is missing or not served"
 done

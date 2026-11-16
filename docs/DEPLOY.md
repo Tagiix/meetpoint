@@ -60,10 +60,10 @@ for the JSON data. Nothing else is required. Optional hardening in the vhost:
     server {
         server_name your.domain;
         root /var/www/meetpoint;
-        index index.html;
+        index index.php index.html;
 
         location / { try_files $uri $uri/ =404; }
-        location ~ ^/api/.+\.php$ {
+        location ~ ^/(index|api/.+)\.php$ {
             include snippets/fastcgi-php.conf;
             fastcgi_pass unix:/run/php/php8.3-fpm.sock;      # adjust to your PHP version
         }
@@ -71,6 +71,8 @@ for the JSON data. Nothing else is required. Optional hardening in the vhost:
         location ~ /\.ht { deny all; }
         gzip on; gzip_types application/json text/css application/javascript;
         location /data/ { expires 1d; }
+        location ~* \.(js|css|html)$ { add_header Cache-Control "no-cache"; }   # re-check on every load
+        # index.php stamps every script, style and data URL with a build id, so an update can never be mixed with old cached files
     }
 
 nginx ignores `.htaccess`, which is why the explicit `deny` above matters.
@@ -105,7 +107,7 @@ Event files are untouched by updates. To refresh timetable or map data, see [DAT
 | routing.openstreetmap.de (public OSRM) | walking, cycling and car route shapes for the selected result | start and end coordinates |
 
 The OSRM demo server is not meant for heavy use. For a busy site, self-host OSRM and change the URL in `assets/app.js` (`OSRM` constant and `refine()`); the app falls back to straight-line estimates if it is unreachable.
-To remove the CDN dependency, download Leaflet 1.9.4 into `assets/` and change the two tags in `index.html`.
+To remove the CDN dependency, download Leaflet 1.9.4 into `assets/` and change the two tags in `index.php`.
 
 ## Checklist for an agent or script
 

@@ -23,6 +23,8 @@
       this.t = 0; this.T = 0; this.speed = 1; this.playing = false; this.last = 0;
       const redraw = () => { this.resize(); this.draw(); };
       map.on("move zoom resize", redraw);
+      map.on("zoomanim", () => (this.cv.style.visibility = "hidden"));            // hidden while Leaflet animates the zoom, back at the end
+      map.on("zoomend", () => { this.cv.style.visibility = ""; redraw(); });
       addEventListener("resize", redraw);
       this.resize();
     }

@@ -47,8 +47,22 @@ await A.waitForFunction(() => document.querySelector('#count')?.textContent.star
 check('organizer sees the guest by polling', true);
 await A.waitForSelector('.res');
 check('three ranked results', (await A.locator('.res').count()) === 3);
+check('animation does not start by itself', (await A.locator('#play').textContent()).trim() === '▶');
+await A.click('#play'); await A.waitForTimeout(400);
+check('Play starts it', (await A.locator('#play').textContent()).trim() === '❚❚');
+await A.click('#play');
 await A.screenshot({ path: 'shots/organizer.png' });
 
+// the address dropdown: case, accents and apostrophes are ignored; Tab and arrows walk the list, Enter picks
+{
+  const f = A.locator('[data-addr=d]').first();
+  await f.fill('GARE DE LEST'); await A.waitForTimeout(400);
+  check('station search ignores case and apostrophes', /Gare de l'Est/.test((await A.locator('.suggest li').allTextContents()).join('|')));
+  await f.fill(''); await f.type('nation', { delay: 20 }); await A.waitForTimeout(600);
+  await A.keyboard.press('Tab'); await A.keyboard.press('Tab');
+  check('Tab walks down the dropdown', (await A.locator('.suggest li.on').count()) === 1 && /Nationale/.test(await A.locator('.suggest li.on').textContent()));
+  await f.fill('');
+}
 // the organizer edits the guest's address through the station search, and gives themself a different way back
 await A.locator('.person[data-pid]').nth(1).locator('[data-act=edit]').click();
 check('organizer can edit someone else', (await A.locator('.more').count()) === 1);
@@ -77,6 +91,23 @@ await G.waitForTimeout(1000);
 check('guest renamed their own entry', (await event()).people.some((p) => p.name === 'Guest Renamed'));
 await A.click('[data-act=remove]'); await A.waitForTimeout(1200);
 check('organizer removed the guest', (await event()).people.length === 1);
+
+// an update installed while the page is open: the page reloads itself (we fake one by touching a file)
+import { utimesSync, existsSync } from 'node:fs';
+const css = new URL('../../assets/style.css', import.meta.url).pathname;
+if (existsSync(css)) {
+  const before = await A.evaluate(() => window.MP_BUILD);
+  const now = new Date(); utimesSync(css, now, new Date(now.getTime() + 5000 + Math.floor(Math.random() * 1000)));
+  await A.evaluate(() => { window.__marker = 1; });
+  await A.evaluate(() => window.__meetpointCheckUpdate());
+  await A.waitForFunction(() => window.__marker === undefined, null, { timeout: 15000 }).catch(() => {});
+  await A.waitForSelector('#copy-adm', { timeout: 15000 });
+  check('page reloads itself after an update', (await A.evaluate(() => window.MP_BUILD)) !== before);
+}
+
+// "Reload everything" refetches the app and keeps the organizer's keys
+await A.click('#hard-reload'); await A.waitForSelector('#copy-adm', { timeout: 20000 });
+check('still organizer after a full reload', (await A.locator('#copy-adm').count()) === 1);
 
 // clean up: delete the event with the organizer key the browser stored
 const adminKey = await A.evaluate((i) => JSON.parse(localStorage.getItem('meetpoint:v2')).events[i].admin, id);

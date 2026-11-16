@@ -1,7 +1,7 @@
 # Architecture
 
 ## Data flow
-    browser ── GET index.html, assets/*, data/*.json ──► static files
+    browser ── GET index.php (stamps ?v=<build> on every asset URL), assets/*, data/*.json ──► files
     browser ── POST/GET api/meetup.php ──────────────► PHP: events as files in data/events/
     browser ── address search ──► api-adresse.data.gouv.fr         (geocoding)
     browser ── street geometry ─► routing.openstreetmap.de (OSRM)  (walk/bike/car route shapes)
@@ -34,13 +34,17 @@ For the selected result `itinerary()` rebuilds each person's legs (access, wait,
 with OSRM street geometry and durations, and updates the card numbers so they match the animation.
 
 ## The abstract map (`assets/basemap.js`)
-A canvas below Leaflet's panes; Leaflet only provides pan/zoom, markers and the projection (it has no tile layer). Layers, in draw order:
-green areas, water polygons (even-odd, so islands are holes), rivers, roads (4 tiers, secondary/tertiary load lazily from `roads-detail.json` at zoom ≥ 12),
-optional bus lines, rail lines by mode, restaurant glow (zoom < 14.5, drawn at ¼ resolution and scaled up to blur) or dots (zoom ≥ 14.5, names at ≥ 16),
-town and park names, stations and their labels (collision-avoided). Points are stored as mercator floats (`Float32Array`) and culled by bounding box.
-`zoomAnimation` is off. The canvas is 20 % larger than the view on every side and is only slid by the browser while dragging; it is repainted when the
-zoom changes or when a drag has used up its margin. Roads are batched into one stroke per style (thousands of strokes per frame was the cost).
-The flow canvas is separate and cheap.
+No map service: a Leaflet `GridLayer` whose tiles are canvases painted from our own data. Each 256 px tile is painted once (newest request first, a few ms per slice so the page stays
+responsive) and kept in a 100-tile cache, so panning and zooming only move and scale finished tiles and Leaflet's zoom animation works. Layers in draw order: green areas,
+water polygons (even-odd, so islands are holes), rivers, roads (4 tiers, one path and one stroke per style), optional bus lines, rail lines by mode, restaurant glow
+(zoom < 14.5, 1/4 resolution scaled up to blur; tile edges line up because 256 is a multiple of 4) or dots (zoom ≥ 14.5).
+Town, park and station names are not in the tiles (names must not be cut at tile edges): they are drawn on one overlay canvas in its own pane, 25 % larger than the view, repainted
+when a move ends or the zoom changes and hidden by Leaflet during zoom animations. Changing data or a legend switch calls `draw()`, which invalidates every tile (coalesced).
+Points are mercator floats (`Float32Array`) culled by bounding box.
+
+**Everything is loaded once at page start** (`loadBasemap` in `app.js`): core layers first so the first picture appears at once, then secondary and tertiary roads, bus lines and the bus
+network, built in slices. Nothing is requested while using the map. The only network calls afterwards are the event API (polling with back-off: 10 s, then 20 s and 40 s while nothing changes, none in a hidden tab),
+the address search, and OSRM street routes for the selected result (debounced 0.5 s, cached by trip).
 
 ## Events (`api/meetup.php`)
 One file per event: `data/events/<id>.php` = a guard line + JSON `{id, title, options, people[], adminHash, created, updated, rev}`.
