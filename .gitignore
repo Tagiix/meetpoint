@@ -1,0 +1,15 @@
+# runtime state: people's positions. Never commit.
+data/events/*
+!data/events/.htaccess
+
+# build inputs and caches (large, re-downloadable)
+*.osm.pbf
+gtfs/
+IDFM-gtfs.zip
+rail.json
+bus.json
+
+# tooling
+node_modules/
+test/e2e/shots/
+.DS_Store

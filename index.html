@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meet Point</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div id="app">
+  <aside id="panel">
+    <header class="brand">
+      <div class="logo">◎</div>
+      <div><h1>Meet Point</h1><p>Find the fairest place to meet in Île-de-France</p></div>
+    </header>
+    <div id="notice" class="msg" hidden></div>
+    <div id="view"></div>
+    <footer>
+      <span>Metro, RER, train and tram, plus buses when enabled. Times are estimates from average timetables, not live.</span>
+      <span>Data: Île-de-France Mobilités, OpenStreetMap contributors (ODbL), adresse.data.gouv.fr.</span>
+    </footer>
+  </aside>
+
+  <main id="stage">
+    <div id="map"></div>
+    <canvas id="flow"></canvas>
+    <div id="legend" class="float" hidden></div>
+    <div id="player" class="float" hidden>
+      <button id="play" class="btn primary" aria-label="Play or pause">❚❚</button>
+      <input id="seek" type="range" min="0" max="1000" value="0" aria-label="Time">
+      <span id="clock">0 min</span>
+      <select id="speed" class="select" aria-label="Speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>
+    </div>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="assets/solver.js"></script>
+<script src="assets/flow.js"></script>
+<script src="assets/basemap.js"></script>
+<script src="assets/api.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>
