@@ -12,6 +12,21 @@ so the server only stores events. A basic shared host is enough.
 - Disk: about 20 MB for the app plus data, plus a few KB per event. No database. No cron job needed.
 - The server needs **no outbound internet**. The visitors' browsers call third-party services themselves (see the table below).
 
+## Getting the code when the repository is private
+
+GitHub has no "anyone with the link" access for private repositories. Choose one:
+
+- **Invite a person** (they need a GitHub account): repo → Settings → Collaborators → Add people (read access is enough), or
+  `gh api -X PUT repos/Tagiix/meetpoint/collaborators/<github-user> -f permission=pull`. They accept the emailed invitation, then `git clone`.
+- **Deploy key for a server or an agent** (read-only, scoped to this one repo, no personal account involved):
+  on the server run `ssh-keygen -t ed25519 -f ~/.ssh/meetpoint_deploy -N ""`, then add `~/.ssh/meetpoint_deploy.pub` under
+  repo → Settings → Deploy keys (leave "Allow write access" off). Clone with
+  `GIT_SSH_COMMAND="ssh -i ~/.ssh/meetpoint_deploy -o IdentitiesOnly=yes" git clone git@github.com:Tagiix/meetpoint.git`.
+- **A zip, no GitHub account needed**: `git archive --format=zip -o meetpoint.zip HEAD` (about 6 MB compressed), then send the file
+  by any channel and unzip it on the server. Collaborators can also use the green Code → Download ZIP button.
+- **Make it public** (Settings → Danger zone → Change visibility) if anyone with the link should be able to clone it. The repo contains no secrets
+  and no personal data (event files are not committed), but see the data licences in [DATA.md](DATA.md) first.
+
 ## Steps
 
 1. Get the files onto the server (the repo includes the built data, so nothing needs building):
