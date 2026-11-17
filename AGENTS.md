@@ -27,6 +27,7 @@ Node: `node --check assets/*.js`. PHP: `php -l api/meetup.php`.
 ## Layout
 | Path | Role |
 |---|---|
+| `assets/i18n.js` | interface languages (English source text, French dictionary): `tr("English sentence", {vars})`, `trn(n, one, other)`; EN \| FR switch; the page's fixed text uses `data-i18n` attributes |
 | `assets/engine-core.js`, `assets/solve-worker.js`, `assets/engine.js` | the solving engine (no DOM), the Web Worker hosting it, and the page-side client with a page-thread fallback |
 | `tools/seed_events.py` | creates sample events on a running server and prints organizer/guest links and one `?import=` link |
 | `index.php` | single page shell (PHP only to stamp `?v=<build id>` on every asset URL); scripts in order: Leaflet (CDN), solver, flow, basemap, api, app |

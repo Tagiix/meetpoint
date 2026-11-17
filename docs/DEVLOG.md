@@ -80,6 +80,14 @@ minimize the longest trip, restaurants nearby), a nice flow animation, and the *
 - Import and storage diagnostics (owner reported the import link showing nothing in Zen while a fresh Zen profile driven over its debugging port worked): the page now says "Remembered N events in this browser (M in the list)" after an import, imported events get a placeholder title so they are listed at once, a storage self-test warns when the browser blocks site storage, and `store()` tolerates damaged saved data. Verified in real Zen (headless, fresh profile) with empty, stale and invalid saved state.
   Confirmed working in the owner's Zen after the last of these changes (the exact cause on their profile was never pinned down: imported events used to stay hidden until the server lookup had given them a title). The page now also states when it removes remembered events and why.
 
+## Round 7: French interface (branch `feature/french`)
+- `assets/i18n.js`: the English sentence is the key, the French dictionary (about 190 entries) is next to it; a sentence without French shows in English and is listed in `I18n.missing`, which the e2e test requires to be empty after a tour of the pages.
+  Placeholders `{name}`, plural helper `trn` (French counts 0 and 1 as singular). The language is the browser's unless EN | FR was clicked (kept in localStorage; switching reloads the page, nothing else is lost).
+- Fixed page text uses `data-i18n*` attributes (index.php); app text goes through `tr()`. Addresses are stored in English markers ("Dropped pin", "(station)") and shown translated (`dispAddr`), so an event reads correctly in either language;
+  server error messages are translated on the client; culture types come from OpenStreetMap in English and are translated for display (museum -> musée).
+- Not translated: the docs (English), the place names and addresses (they are data).
+- To add a language: copy the French dictionary in `assets/i18n.js`, translate the values, and add the language code to the switch.
+
 ## Not done / ideas
 - Live traffic and real-time departures: **decided against** (2026-11-17). It needs the transport authority's API key (so a server-side proxy), rate-limit handling and per-person queries that cannot be precomputed, which breaks the "basic server, everything in the browser" design; the timetable model is already within a few minutes.
 - Activity filter (parks, culture, cinemas) beyond food and drink; French interface.

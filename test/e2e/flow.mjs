@@ -163,6 +163,23 @@ check('still organizer after a full reload', (await A.locator('#copy-adm').count
   await fresh.close();
 }
 
+// French: a French browser gets a French page, nothing is left untranslated, the EN | FR switch works and is remembered
+{
+  const fr = await (await browser.newContext({ locale: 'fr-FR', viewport: { width: 1300, height: 850 } })).newPage();
+  fr.on('pageerror', (e) => check('no page errors (French)', false, e.message));
+  await fr.goto(BASE); await fr.waitForSelector('#create');
+  check('a French browser gets the French page', (await fr.locator('#create').textContent()).trim() === "Créer l'événement" && (await fr.evaluate(() => document.documentElement.lang)) === 'fr');
+  await fr.goto(BASE + '?e=' + id); await fr.waitForSelector('#v-head', { timeout: 15000 }); await fr.waitForTimeout(1500);
+  check('the event page is French', /Inviter des personnes/.test(await fr.locator('#view').innerText()));
+  const missing = await fr.evaluate(() => [...I18n.missing]);
+  check('no sentence is left without a French translation', missing.length === 0, JSON.stringify(missing));
+  await fr.click('#lang button[data-lang=en]'); await fr.waitForSelector('#v-head', { timeout: 15000 });
+  check('the EN button switches to English', /Invite people/.test(await fr.locator('#view').innerText()));
+  await fr.reload(); await fr.waitForSelector('#v-head', { timeout: 15000 });
+  check('the chosen language is remembered', /Invite people/.test(await fr.locator('#view').innerText()));
+  await fr.close();
+}
+
 // clean up: delete the event with the organizer key the browser stored
 const adminKey = await A.evaluate((i) => JSON.parse(localStorage.getItem('meetpoint:v2')).events[i].admin, id);
 const del = await fetch(BASE + 'api/meetup.php', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', id, adminKey }) }).then((r) => r.json());

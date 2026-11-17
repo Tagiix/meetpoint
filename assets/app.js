@@ -1,5 +1,6 @@
 (function () {
   "use strict";
+  const tr = I18n.t, trn = I18n.tn;                      // translate: the English text is the key (assets/i18n.js)
   const COLORS = ["#e8541e", "#2a7de1", "#2e9e5b", "#a24bd6", "#d9a400", "#e0457b", "#119da4", "#7a5c3e", "#4b5bd6", "#8a9a1f"];
   const MODES = [["walk", "Walk"], ["transit", "Transit"], ["bike", "Bike"], ["car", "Car"]];
   const OBJECTIVES = [
@@ -33,7 +34,7 @@
   /* ---------- map ---------- */
   const map = L.map("map", { zoomControl: true, zoomSnap: 0.5, minZoom: 9, maxZoom: 17, maxBounds: [[47.8, 1.1], [49.7, 4.0]] }).setView([48.8566, 2.3522], 11);
   map.attributionControl.setPrefix(false);
-  map.attributionControl.addAttribution("Data © Île-de-France Mobilités, OpenStreetMap contributors");
+  map.attributionControl.addAttribution(tr("Data © Île-de-France Mobilités, OpenStreetMap contributors"));
   const base = new Basemap(map);
   window.__meetpointMap = map; window.__meetpointBase = base;                         // handy for debugging and screenshots
   const flow = new Flow(map, $("flow"), { onTick });
@@ -98,10 +99,10 @@
 
   function renderLegend() {
     const el = $("legend"); el.hidden = false;
-    el.innerHTML = `<div class="k"><span class="sw" style="background:linear-gradient(90deg,#ffbe00,#0055c8,#eb2132,#84653d)"></span>Metro, RER, train, tram</div>
-      <label><input type="checkbox" id="lg-roads" ${base.show.roads ? "checked" : ""}> Roads</label>
-      <label><input type="checkbox" id="lg-food" ${base.show.food ? "checked" : ""}> Restaurants <span class="dots"><i style="background:var(--poi-r)"></i><i style="background:var(--poi-c)"></i><i style="background:var(--poi-b)"></i></span></label>
-      <label><input type="checkbox" id="lg-bus" ${base.show.bus ? "checked" : ""}> Bus lines</label>`;
+    el.innerHTML = `<div class="k"><span class="sw" style="background:linear-gradient(90deg,#ffbe00,#0055c8,#eb2132,#84653d)"></span>${tr("Metro, RER, train, tram")}</div>
+      <label><input type="checkbox" id="lg-roads" ${base.show.roads ? "checked" : ""}> ${tr("Roads")}</label>
+      <label><input type="checkbox" id="lg-food" ${base.show.food ? "checked" : ""}> ${tr("Restaurants")} <span class="dots"><i style="background:var(--poi-r)"></i><i style="background:var(--poi-c)"></i><i style="background:var(--poi-b)"></i></span></label>
+      <label><input type="checkbox" id="lg-bus" ${base.show.bus ? "checked" : ""}> ${tr("Bus lines")}</label>`;
     $("lg-food").onchange = (e) => { base.show.food = e.target.checked; base.draw(); };
     $("lg-roads").onchange = (e) => { base.show.roads = e.target.checked; base.draw(); };
     $("lg-bus").onchange = (e) => { base.show.bus = e.target.checked; base.draw(); };
@@ -110,13 +111,17 @@
   /* what a result row points at: a station, or a place (café, restaurant, bar, park) */
   const KIND = { station: "Station", r: "Restaurant", c: "Café", b: "Bar", park: "Park", culture: "Culture", sights: "Sight" };
   const cap = (x) => x.charAt(0).toUpperCase() + x.slice(1);
+  const kindLabel = (pl) => (pl.sub ? cap(tr(pl.sub)) : tr(KIND[pl.kind] || "Place"));          // "museum" -> "Musée"
+  // addresses are stored with English markers ("Dropped pin", "(station)"); they are shown in the current language
+  const dispAddr = (a) => String(a || "").replace(/ \((station|bus stop)\)$/, (m, k) => " " + tr("(" + k + ")")).replace(/^(Dropped pin|Locating…)$/, (m) => tr(m));
+  const errMsg = (e) => { const m = (e && e.message) || String(e); return I18n.LANG === "fr" && I18n.FR[m] ? I18n.FR[m] : m; };     // server messages come in English
   function nearestStation(lat, lon) {
     let best = null, bd = Infinity;
     for (let i = 0; i < (graphBase.railCount || graphBase.stations.length); i++) { const st = graphBase.stations[i], d = Math.hypot((st[2] - lat) * 111, (st[3] - lon) * 73); if (d < bd) { bd = d; best = st; } }
     return best;
   }
   function targetOf(r) {
-    if (r.place && r.place.kind !== "station") { const near = nearestStation(r.place.lat, r.place.lon), what = r.place.sub ? cap(r.place.sub) : KIND[r.place.kind] || "Place"; return { name: r.place.name, lat: r.place.lat, lon: r.place.lon, sub: `${what}${near ? " · near " + near[1] : ""}` }; }
+    if (r.place && r.place.kind !== "station") { const near = nearestStation(r.place.lat, r.place.lon), what = kindLabel(r.place); return { name: r.place.name, lat: r.place.lat, lon: r.place.lon, sub: `${what}${near ? tr(" · near {s}", { s: near[1] }) : ""}` }; }
     if (r.place) return { name: r.place.name, lat: r.place.lat, lon: r.place.lon, sub: "" };
     const st = graphBase.stations[r.c]; return { name: st[1], lat: st[2], lon: st[3], sub: "" };
   }
@@ -134,10 +139,10 @@
     clearTimeout(notice.t); if (text && kind === "ok") notice.t = setTimeout(() => (n.hidden = true), 6000);
   }
   async function copyText(text, codeEl) {
-    try { await navigator.clipboard.writeText(text); notice("Link copied.", "ok"); }
+    try { await navigator.clipboard.writeText(text); notice(tr("Link copied."), "ok"); }
     catch (e) {
       if (codeEl) { const r = document.createRange(); r.selectNodeContents(codeEl); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
-      notice("Select the link and copy it (Cmd/Ctrl+C).", "warn");
+      notice(tr("Select the link and copy it (Cmd/Ctrl+C)."), "warn");
     }
   }
   const inviteUrl = () => location.origin + location.pathname + "?e=" + S.ev.id;
@@ -145,23 +150,23 @@
   const isMine = (p) => !!S.mine[p.id];
   const canEdit = (p) => isMine(p) || !!S.admin;                    // the organizer may edit anybody
   const hasRet = (p) => !!p.ret && (Math.abs(p.ret.lat - p.lat) > 1e-5 || Math.abs(p.ret.lon - p.lon) > 1e-5);
-  const addrOf = (q) => q.addr || q.lat.toFixed(4) + ", " + q.lon.toFixed(4);
+  const addrOf = (q) => dispAddr(q.addr) || q.lat.toFixed(4) + ", " + q.lon.toFixed(4);
 
   /* ---------- options form (shared by "create" and the organizer's event view) ---------- */
   function optionsHTML(o, editable) {
     const dis = editable ? "" : " disabled";
     const obj = OBJECTIVES.find((x) => x[0] === o.objective) || OBJECTIVES[0];
     return `<div class="stack">
-      <div class="field"><label>Optimize for</label>
-        <div class="seg ${editable ? "edit" : ""}">${OBJECTIVES.map(([v, l, t]) => `<button type="button" data-opt="objective" data-v="${v}" title="${esc(t)}" class="${o.objective === v ? "on" : ""}"${dis}>${l}</button>`).join("")}</div>
-        <p class="small muted">${obj[2]}</p></div>
-      <div class="field"><label>Meet at</label>
-        <div class="chips">${MEET.map(([k, l]) => `<button type="button" class="chip ${meetOf(o).includes(k) ? "on" : ""}" data-meet="${k}" aria-pressed="${meetOf(o).includes(k)}"${dis}>${l}</button>`).join("")}</div>
-        <p class="small muted">${meetOf(o).length === 1 && meetOf(o)[0] === "station" ? "A metro, RER, train or tram station." : "Tick any mix. Stations are the quickest for public transport; other places add a walk from the nearest stop (up to 15 min), while people on foot, by bike or by car go straight there. Results are at least 500 m apart."}</p></div>
-      <div class="field"><label>Day</label>
-        <div class="seg ${editable ? "edit" : ""}">${[["0", "Weekday"], ["1", "Weekend"]].map(([v, l]) => `<button type="button" data-opt="profile" data-v="${v}" class="${String(o.profile) === v ? "on" : ""}"${dis}>${l}</button>`).join("")}</div></div>
-      <label class="switch"><span>Include buses in trips<br><span class="small muted">Loads more data, a bit slower</span></span><input type="checkbox" data-opt="buses" ${o.buses ? "checked" : ""}${dis}></label>
-      <div class="field"><label>Longest trip allowed: <span class="muted">${o.maxmin ? o.maxmin + " min" : "no limit"}</span></label>
+      <div class="field"><label>${tr("Optimize for")}</label>
+        <div class="seg ${editable ? "edit" : ""}">${OBJECTIVES.map(([v, l, tip]) => `<button type="button" data-opt="objective" data-v="${v}" title="${esc(tr(tip))}" class="${o.objective === v ? "on" : ""}"${dis}>${tr(l)}</button>`).join("")}</div>
+        <p class="small muted">${tr(obj[2])}</p></div>
+      <div class="field"><label>${tr("Meet at")}</label>
+        <div class="chips">${MEET.map(([k, l]) => `<button type="button" class="chip ${meetOf(o).includes(k) ? "on" : ""}" data-meet="${k}" aria-pressed="${meetOf(o).includes(k)}"${dis}>${tr(l)}</button>`).join("")}</div>
+        <p class="small muted">${meetOf(o).length === 1 && meetOf(o)[0] === "station" ? tr("A metro, RER, train or tram station.") : tr("Tick any mix. Stations are the quickest for public transport; other places add a walk from the nearest stop (up to 15 min), while people on foot, by bike or by car go straight there. Results are at least 500 m apart.")}</p></div>
+      <div class="field"><label>${tr("Day")}</label>
+        <div class="seg ${editable ? "edit" : ""}">${[["0", "Weekday"], ["1", "Weekend"]].map(([v, l]) => `<button type="button" data-opt="profile" data-v="${v}" class="${String(o.profile) === v ? "on" : ""}"${dis}>${tr(l)}</button>`).join("")}</div></div>
+      <label class="switch"><span>${tr("Include buses in trips")}<br><span class="small muted">${tr("Loads more data, a bit slower")}</span></span><input type="checkbox" data-opt="buses" ${o.buses ? "checked" : ""}${dis}></label>
+      <div class="field"><label>${tr("Longest trip allowed:")} <span class="muted">${o.maxmin ? o.maxmin + " min" : tr("no limit")}</span></label>
         <input type="range" data-opt="maxmin" min="0" max="120" step="5" value="${o.maxmin}"${dis}></div>
     </div>`;
   }
@@ -178,13 +183,13 @@
     clearTimeout(pollTimer); S.ev = null; S.admin = null; S.mine = {}; S.editing = null; S.draft = blankDraft();
     document.title = "Meet Point"; clearResult(); renderMarkers(); renderDraftMarkers();
     $("view").innerHTML = `
-      <section><h2>Plan a meet-up</h2>
+      <section><h2>${tr("Plan a meet-up")}</h2>
         <div class="card stack">
-          <div class="field"><label for="f-title">Event name</label><input id="f-title" class="input" maxlength="80" placeholder="Friday dinner" value="${esc(S.title)}"></div>
+          <div class="field"><label for="f-title">${tr("Event name")}</label><input id="f-title" class="input" maxlength="80" placeholder="${esc(tr("Friday dinner"))}" value="${esc(S.title)}"></div>
           <div id="home-opts">${optionsHTML(S.draftOpts, true)}</div>
-          <button id="create" class="btn primary block">Create event</button>
+          <button id="create" class="btn primary block">${tr("Create event")}</button>
         </div>
-        ${S.api ? '<p class="small muted">You get a link to send around. Everyone who opens it adds their own position, and the best meeting point updates live.</p>' : ""}
+        ${S.api ? `<p class="small muted">${tr("You get a link to send around. Everyone who opens it adds their own position, and the best meeting point updates live.")}</p>` : ""}
       </section>
       <div id="home-events">${homeEvents()}</div>`;
     syncStoredEvents();
@@ -192,7 +197,7 @@
   /* "Your events": what this browser remembers (titles and keys live in localStorage) */
   function homeEvents() {
     const evs = Object.entries(store().events).filter(([, e]) => e.title);
-    return evs.length ? `<section><h2>Your events</h2><ul class="stack" style="gap:8px">${evs.map(([id, e]) => `<li><button class="btn block" data-open="${id}" style="justify-content:space-between"><span>${esc(e.title)}</span><span class="muted small">${e.admin ? "organizer" : "guest"}</span></button></li>`).join("")}</ul></section>` : "";
+    return evs.length ? `<section><h2>${tr("Your events")}</h2><ul class="stack" style="gap:8px">${evs.map(([id, e]) => `<li><button class="btn block" data-open="${id}" style="justify-content:space-between"><span>${esc(e.title)}</span><span class="muted small">${e.admin ? tr("organizer") : tr("guest")}</span></button></li>`).join("")}</ul></section>` : "";
   }
   /* ask the server about every remembered event: forget the ones that no longer exist, refresh the titles (also names events added by an import link) */
   async function syncStoredEvents() {
@@ -206,8 +211,8 @@
     }));
     if (changed) { putStore(st); const box = $("home-events"); if (box && !S.ev) box.innerHTML = homeEvents(); }
     // say what happened, and keep saying it (no auto-hide): silent clean-ups are what made this hard to diagnose
-    if (gone.length) notice(`The server says ${gone.length} remembered event${gone.length === 1 ? "" : "s"} no longer exist${gone.length === 1 ? "s" : ""} (${gone.join(", ")}), so ${gone.length === 1 ? "it was" : "they were"} removed from the list.`, "warn");
-    else if (failed.length) notice(`Could not check ${failed.length} event${failed.length === 1 ? "" : "s"} with the server (${failed[0]}).`, "warn");
+    if (gone.length) notice(trn(gone.length, "The server says {n} remembered event no longer exists ({ids}), so it was removed from the list.", "The server says {n} remembered events no longer exist ({ids}), so they were removed from the list.", { ids: gone.join(", ") }), "warn");
+    else if (failed.length) notice(trn(failed.length, "Could not check {n} event with the server ({why}).", "Could not check {n} events with the server ({why}).", { why: failed[0] }), "warn");
   }
 
   function showEvent() {
@@ -215,23 +220,23 @@
     $("view").innerHTML = `
       <section id="v-head"></section>
       <section id="v-phase"></section>
-      <section id="v-people-sec"><h2>People <span id="count" class="muted"></span></h2><ul id="people"></ul></section>
-      <section id="v-results" hidden><h2>Best meeting points</h2><div id="cards"></div><div id="places"></div></section>
+      <section id="v-people-sec"><h2>${tr("People")} <span id="count" class="muted"></span></h2><ul id="people"></ul></section>
+      <section id="v-results" hidden><h2>${tr("Best meeting points")}</h2><div id="cards"></div><div id="places"></div></section>
       <section id="v-add"></section>
-      <section id="v-opts"><h2>Settings</h2><div class="card" id="opts-body"></div></section>
-      ${S.admin ? '<section><button id="del" class="btn danger sm" style="align-self:flex-start">Delete this event</button></section>' : ""}`;
+      <section id="v-opts"><h2>${tr("Settings")}</h2><div class="card" id="opts-body"></div></section>
+      ${S.admin ? `<section><button id="del" class="btn danger sm" style="align-self:flex-start">${tr("Delete this event")}</button></section>` : ""}`;
     renderHead(); renderPeople(); renderAdd(); renderOpts(); renderPhase();
     idle = 0; nextPoll();
   }
   function renderHead() {
     $("v-head").innerHTML = `
-      <button class="btn ghost sm" id="home" style="align-self:flex-start;margin-left:-10px">← All events</button>
-      ${S.admin ? `<input id="ev-title" class="input" style="font-weight:700;font-size:18px;height:46px" maxlength="80" value="${esc(S.ev.title)}" aria-label="Event name">` : `<h2 style="font-size:22px;letter-spacing:-.01em;text-transform:none;color:var(--ink)">${esc(S.ev.title)}</h2>`}
+      <button class="btn ghost sm" id="home" style="align-self:flex-start;margin-left:-10px">${tr("← All events")}</button>
+      ${S.admin ? `<input id="ev-title" class="input" style="font-weight:700;font-size:18px;height:46px" maxlength="80" value="${esc(S.ev.title)}" aria-label="${esc(tr("Event name"))}">` : `<h2 style="font-size:22px;letter-spacing:-.01em;text-transform:none;color:var(--ink)">${esc(S.ev.title)}</h2>`}
       <div class="card invite">
-        <b>Invite people</b>
-        <p class="small muted">Send this link. Everyone who opens it adds their own position.</p>
+        <b>${tr("Invite people")}</b>
+        <p class="small muted">${tr("Send this link. Everyone who opens it adds their own position.")}</p>
         <code id="inv-url">${esc(inviteUrl())}</code>
-        <div class="row"><button class="btn primary sm" id="copy-inv">Copy invite link</button>${S.admin ? '<button class="btn sm" id="copy-adm" title="Open this on another device to stay organizer. Keep it private.">Copy organizer link</button>' : ""}</div>
+        <div class="row"><button class="btn primary sm" id="copy-inv">${tr("Copy invite link")}</button>${S.admin ? `<button class="btn sm" id="copy-adm" title="${esc(tr("Open this on another device to stay organizer. Keep it private."))}">${tr("Copy organizer link")}</button>` : ""}</div>
       </div>`;
   }
   /* An address with its three ways of being set: typing (suggestions), picking on the map, and (optionally) the device location.
@@ -239,22 +244,22 @@
   function addrField(ak, label, pos, draft) {
     const set = pos.lat !== null && pos.lat !== undefined;
     return `<div class="field"><label>${label}</label>
-      <div class="searchbox" data-ak="${ak}"><input class="input" data-addr="${ak}" autocomplete="off" placeholder="Type an address in Île-de-France…" value="${esc(pos.addr || "")}"><ul class="suggest" hidden></ul></div>
-      <div class="searchbox" data-ak="${ak}"><input class="input" data-stn="${ak}" autocomplete="off" placeholder="Or a station: metro, RER, bus…"><ul class="suggest" hidden></ul></div>
-      <div class="row"><button type="button" class="btn sm" data-pick="${ak}" title="Click anywhere, or on a station to snap to it">${S.picking === ak ? "Click the map or a station…" : "Pick on map"}</button>${draft ? `<button type="button" class="btn sm" data-geo="${ak}">Use my location</button>` : ""}</div>
-      ${draft && set ? `<div class="placed"><span class="dot"></span><span class="grow">${esc(pos.addr || "Pin placed")}</span></div>` : ""}</div>`;
+      <div class="searchbox" data-ak="${ak}"><input class="input" data-addr="${ak}" autocomplete="off" placeholder="${esc(tr("Type an address in Île-de-France…"))}" value="${esc(dispAddr(pos.addr))}"><ul class="suggest" hidden></ul></div>
+      <div class="searchbox" data-ak="${ak}"><input class="input" data-stn="${ak}" autocomplete="off" placeholder="${esc(tr("Or a station: metro, RER, bus…"))}"><ul class="suggest" hidden></ul></div>
+      <div class="row"><button type="button" class="btn sm" data-pick="${ak}" title="${esc(tr("Click anywhere, or on a station to snap to it"))}">${S.picking === ak ? tr("Click the map or a station…") : tr("Pick on map")}</button>${draft ? `<button type="button" class="btn sm" data-geo="${ak}">${tr("Use my location")}</button>` : ""}</div>
+      ${draft && set ? `<div class="placed"><span class="dot"></span><span class="grow">${esc(dispAddr(pos.addr) || tr("Pin placed"))}</span></div>` : ""}</div>`;
   }
-  const modeChips = (modes, attr) => `<div class="chips">${MODES.map(([k, l]) => `<button type="button" class="chip ${modes[k] ? "on" : ""}" data-${attr}="${k}" aria-pressed="${!!modes[k]}">${l}</button>`).join("")}</div>`;
+  const modeChips = (modes, attr) => `<div class="chips">${MODES.map(([k, l]) => `<button type="button" class="chip ${modes[k] ? "on" : ""}" data-${attr}="${k}" aria-pressed="${!!modes[k]}">${tr(l)}</button>`).join("")}</div>`;
   function editHTML(p) {
     return `<div class="more">
-      <div class="field"><label>Name</label><input class="input" data-f="name" maxlength="40" value="${esc(p.name)}"></div>
-      ${addrField("p:" + p.id, "Starts from", p)}
-      <label class="switch"><span>Different address for the way back</span><input type="checkbox" data-retsw ${p.ret ? "checked" : ""}></label>
-      ${p.ret ? addrField("r:" + p.id, "Goes back to", p.ret) : ""}
-      <div class="field"><label>Travels by</label>${modeChips(p.modes, "m")}</div>
-      <div class="field"><label>Weight in "Fastest overall" and "Balanced"</label><select class="select" data-f="weight">${[1, 2, 3].map((w) => `<option value="${w}"${p.weight === w ? " selected" : ""}>×${w}</option>`).join("")}</select></div>
-      <p class="small muted">You can also drag the pins on the map.</p>
-      <button class="btn danger sm" data-act="leave" style="align-self:flex-start">Remove this entry</button>
+      <div class="field"><label>${tr("Name")}</label><input class="input" data-f="name" maxlength="40" value="${esc(p.name)}"></div>
+      ${addrField("p:" + p.id, tr("Starts from"), p)}
+      <label class="switch"><span>${tr("Different address for the way back")}</span><input type="checkbox" data-retsw ${p.ret ? "checked" : ""}></label>
+      ${p.ret ? addrField("r:" + p.id, tr("Goes back to"), p.ret) : ""}
+      <div class="field"><label>${tr("Travels by")}</label>${modeChips(p.modes, "m")}</div>
+      <div class="field"><label>${tr('Weight in "Fastest overall" and "Balanced"')}</label><select class="select" data-f="weight">${[1, 2, 3].map((w) => `<option value="${w}"${p.weight === w ? " selected" : ""}>×${w}</option>`).join("")}</select></div>
+      <p class="small muted">${tr("You can also drag the pins on the map.")}</p>
+      <button class="btn danger sm" data-act="leave" style="align-self:flex-start">${tr("Remove this entry")}</button>
     </div>`;
   }
   function renderPeople() {
@@ -264,13 +269,13 @@
       const mine = isMine(p), can = canEdit(p), open = S.editing === p.id;
       return `<li class="card person" data-pid="${p.id}">
         <span class="dot" style="background:${COLORS[i]}"></span>
-        <div class="nm"><span>${esc(p.name)}</span>${mine ? '<span class="you">you</span>' : ""}</div>
-        <div class="acts row">${can && phase() === "open" ? `<button class="btn sm" data-act="edit">${open ? "Done" : "Edit"}</button>` : ""}${S.admin && !mine && !open && phase() === "open" ? '<button class="btn ghost sm" data-act="remove" title="Remove this person">Remove</button>' : ""}</div>
+        <div class="nm"><span>${esc(p.name)}</span>${mine ? `<span class="you">${tr("you")}</span>` : ""}</div>
+        <div class="acts row">${can && phase() === "open" ? `<button class="btn sm" data-act="edit">${open ? tr("Done") : tr("Edit")}</button>` : ""}${S.admin && !mine && !open && phase() === "open" ? `<button class="btn ghost sm" data-act="remove" title="${esc(tr("Remove this person"))}">${tr("Remove")}</button>` : ""}</div>
         <div class="ad">${esc(addrOf(p))}</div>
         ${hasRet(p) ? `<div class="ad back">↩ ${esc(addrOf(p.ret))}</div>` : ""}
-        ${open ? editHTML(p) : `<div class="chips" style="grid-column:2/-1;margin-top:6px">${MODES.filter(([k]) => p.modes[k]).map(([, l]) => `<span class="chip static">${l}</span>`).join("")}</div>`}
+        ${open ? editHTML(p) : `<div class="chips" style="grid-column:2/-1;margin-top:6px">${MODES.filter(([k]) => p.modes[k]).map(([, l]) => `<span class="chip static">${tr(l)}</span>`).join("")}</div>`}
       </li>`;
-    }).join("") : '<li class="empty">Nobody yet. Add the first position below.</li>';
+    }).join("") : `<li class="empty">${tr("Nobody yet. Add the first position below.")}</li>`;
     renderMarkers();
   }
   let addKey = "";
@@ -283,19 +288,19 @@
     addKey = addState();
     const d = S.draft, hasMine = Object.keys(S.mine).some((pid) => S.ev.people.some((p) => p.id === pid));
     if (phase() !== "open") { $("v-add").innerHTML = ""; return; }
-    if (S.ev.people.length >= 10) { $("v-add").innerHTML = '<div class="msg">This event is full (10 people).</div>'; return; }
-    $("v-add").innerHTML = `<h2>${hasMine ? "Add someone else" : "Add your position"}</h2>
+    if (S.ev.people.length >= 10) { $("v-add").innerHTML = `<div class="msg">${tr("This event is full (10 people).")}</div>`; return; }
+    $("v-add").innerHTML = `<h2>${hasMine ? tr("Add someone else") : tr("Add your position")}</h2>
       <div class="card stack">
-        <div class="field"><label for="d-name">${hasMine ? "Their name" : "Your name"}</label><input id="d-name" class="input" maxlength="40" placeholder="${hasMine ? "Name" : "Your name"}" value="${esc(d.name)}"></div>
-        ${addrField("d", d.retOn ? "Starts from" : "Where from", d, true)}
-        <label class="switch"><span>Different address for the way back</span><input type="checkbox" data-dretsw ${d.retOn ? "checked" : ""}></label>
-        ${d.retOn ? addrField("dr", "Goes back to", d.ret, true) : ""}
-        <div class="field"><label>Travels by</label>${modeChips(d.modes, "dm")}</div>
-        <button id="d-add" class="btn primary block"${canAdd() ? "" : " disabled"}>Add to the event</button>
+        <div class="field"><label for="d-name">${hasMine ? tr("Their name") : tr("Your name")}</label><input id="d-name" class="input" maxlength="40" placeholder="${hasMine ? tr("Name") : tr("Your name")}" value="${esc(d.name)}"></div>
+        ${addrField("d", d.retOn ? tr("Starts from") : tr("Where from"), d, true)}
+        <label class="switch"><span>${tr("Different address for the way back")}</span><input type="checkbox" data-dretsw ${d.retOn ? "checked" : ""}></label>
+        ${d.retOn ? addrField("dr", tr("Goes back to"), d.ret, true) : ""}
+        <div class="field"><label>${tr("Travels by")}</label>${modeChips(d.modes, "dm")}</div>
+        <button id="d-add" class="btn primary block"${canAdd() ? "" : " disabled"}>${tr("Add to the event")}</button>
       </div>`;
   }
   function renderOpts() {
-    $("opts-body").innerHTML = optionsHTML(S.ev.options, !!S.admin && phase() === "open") + (S.admin ? "" : '<p class="small muted" style="margin-top:10px">Only the organizer can change these.</p>');
+    $("opts-body").innerHTML = optionsHTML(S.ev.options, !!S.admin && phase() === "open") + (S.admin ? "" : `<p class="small muted" style="margin-top:10px">${tr("Only the organizer can change these.")}</p>`);
   }
 
   /* ---------- markers ---------- */
@@ -312,8 +317,8 @@
       if (can) m.on("dragend", (e) => { const ll = e.target.getLatLng(); setPos("p:" + p.id, ll.lat, ll.lng, "", true); });
       markers.push(m);
       if (hasRet(p)) {                                  // smaller pin for where they go back to
-        const r = L.marker([p.ret.lat, p.ret.lon], { draggable: can, icon: pinIcon("↩", COLORS[i], "ret"), title: p.name + " (way back)" }).addTo(map);
-        r.bindTooltip(p.name + " · way back", { direction: "top", offset: [0, -20] });
+        const r = L.marker([p.ret.lat, p.ret.lon], { draggable: can, icon: pinIcon("↩", COLORS[i], "ret"), title: p.name + tr(" (way back)") }).addTo(map);
+        r.bindTooltip(p.name + tr(" · way back"), { direction: "top", offset: [0, -20] });
         if (can) r.on("dragend", (e) => { const ll = e.target.getLatLng(); setPos("r:" + p.id, ll.lat, ll.lng, "", true); });
         markers.push(r);
       }
@@ -357,7 +362,7 @@
   /* Suggestion dropdown. Each entry: {label, tag, lat, lon, addr}. Stations are matched here, instantly, ignoring case, accents and
      apostrophes; addresses come from the national address service. Keyboard: Up/Down, Tab/Shift+Tab, Enter picks (the first one if none is
      highlighted), Escape closes. */
-  const stationItem = (m) => ({ label: m.st[1], tag: m.kind === "bus" ? "bus stop" : "station", lat: m.st[2], lon: m.st[3], addr: m.st[1] + (m.kind === "bus" ? " (bus stop)" : " (station)") });
+  const stationItem = (m) => ({ label: m.st[1], tag: tr(m.kind === "bus" ? "bus stop" : "station"), lat: m.st[2], lon: m.st[3], addr: m.st[1] + (m.kind === "bus" ? " (bus stop)" : " (station)") });
   function showSuggestions(box, items) {
     box._items = items; box._active = -1;
     box.innerHTML = items.map((it, i) => `<li data-i="${i}">${esc(it.label)}${it.tag ? ` <span class="muted small">${it.tag}</span>` : ""}</li>`).join(""); box.hidden = !items.length;
@@ -389,28 +394,28 @@
       const r = await Api.post({ action: "join", id: S.ev.id, p: Object.assign(pos(d), { name: d.name.trim(), modes: d.modes, weight: 1, ret: d.retOn ? pos(d.ret) : null }) });
       S.mine[r.pid] = r.token; setLocal(S.ev.id, { mine: S.mine });
       S.draft = Object.assign(blankDraft(), { modes: d.modes }); renderDraftMarkers();
-      await refresh(); notice("Added.", "ok");
-    } catch (e) { notice("Could not add: " + e.message, "warn"); }
+      await refresh(); notice(tr("Added."), "ok");
+    } catch (e) { notice(tr("Could not add: {m}", { m: errMsg(e) }), "warn"); }
   }
   async function savePerson(p) {                        // the owner's token or the organizer's key is accepted
     try { await Api.post({ action: "update", id: S.ev.id, pid: p.id, token: S.mine[p.id], adminKey: S.admin, p }); }
-    catch (e) { notice("Could not save: " + e.message, "warn"); }
+    catch (e) { notice(tr("Could not save: {m}", { m: errMsg(e) }), "warn"); }
     scheduleSolve();
   }
   async function removePerson(p) {
     try {
       await Api.post({ action: "leave", id: S.ev.id, pid: p.id, token: S.mine[p.id], adminKey: S.admin });
       delete S.mine[p.id]; setLocal(S.ev.id, { mine: S.mine }); if (S.editing === p.id) S.editing = null; await refresh();
-    } catch (e) { notice("Could not remove: " + e.message, "warn"); }
+    } catch (e) { notice(tr("Could not remove: {m}", { m: errMsg(e) }), "warn"); }
   }
   function saveOptionsSoon() {
     clearTimeout(optTimer);
-    optTimer = setTimeout(() => { optTimer = null; Api.post({ action: "options", id: S.ev.id, adminKey: S.admin, title: S.ev.title, options: S.ev.options }).catch((e) => notice("Could not save settings: " + e.message, "warn")); }, 500);
+    optTimer = setTimeout(() => { optTimer = null; Api.post({ action: "options", id: S.ev.id, adminKey: S.admin, title: S.ev.title, options: S.ev.options }).catch((e) => notice(tr("Could not save settings: {m}", { m: errMsg(e) }), "warn")); }, 500);
   }
 
   /* ---------- loading and polling ---------- */
   async function openEvent(id) {
-    try { S.ev = await Api.get(id); } catch (e) { S.ev = null; showHome(); return notice("Event not found. It may have been deleted.", "warn"); }
+    try { S.ev = await Api.get(id); } catch (e) { S.ev = null; showHome(); return notice(tr("Event not found. It may have been deleted."), "warn"); }
     const loc = getLocal(id); S.admin = loc.admin; S.mine = loc.mine || {}; S.editing = null; S.draft = blankDraft();
     setLocal(id, { title: S.ev.title }); notice("");
     showEvent(); renderDraftMarkers(); lastSig = ""; scheduleSolve(true);
@@ -436,7 +441,7 @@
       if (!inside(".more")) renderPeople();            // keep the edit panel alone while someone types in it
       if (!inside("#opts-body")) renderOpts();
       renderAddIfNeeded(); renderPhase(); if (phase() === "voting") renderCards(); scheduleSolve();
-    } catch (err) { if (/not found/.test(err.message)) { notice("This event was deleted.", "warn"); return showHome(); } }
+    } catch (err) { if (/not found/.test(err.message)) { notice(tr("This event was deleted."), "warn"); return showHome(); } }
     nextPoll();
   }
   document.addEventListener("visibilitychange", () => { if (S.ev && !document.hidden) { idle = 0; clearTimeout(pollTimer); poll(); } });
@@ -453,18 +458,18 @@
     const sig = JSON.stringify([ps.map((p) => [p.lat, p.lon, hasRet(p) ? p.ret : null, p.modes, p.weight]), o]);
     if (sig === lastSig && !force) return; lastSig = sig;
     const sec = $("v-results"); if (!sec) return; sec.hidden = false;
-    if (ps.length < 2) { clearResult(); renderPhase(); $("cards").innerHTML = '<div class="empty">Add at least two people to see the best meeting point.</div>'; return; }
+    if (ps.length < 2) { clearResult(); renderPhase(); $("cards").innerHTML = `<div class="empty">${tr("Add at least two people to see the best meeting point.")}</div>`; return; }
     const people = ps.map((p) => Object.assign({}, p, { ret: hasRet(p) ? p.ret : null }));
-    if (o.buses && !busWarm) notice("Loading the bus network…");
+    if (o.buses && !busWarm) notice(tr("Loading the bus network…"));
     let r;
     try { r = await engine.solve({ profile: o.profile, buses: o.buses }, people, { objective: o.objective, maxMinutes: o.maxmin, top: 5, meet: meetOf(o) }); }
-    catch (e) { return notice("Could not compute the meeting point (" + e.message + ")." + (o.buses ? " Turn buses off or run tools/build_bus.py." : ""), "warn"); }
+    catch (e) { return notice(tr("Could not compute the meeting point ({m}).", { m: errMsg(e) }) + (o.buses ? tr(" Turn buses off or run tools/build_bus.py.") : ""), "warn"); }
     if (o.buses && !busWarm) { busWarm = true; notice(""); }
     if (!r) return;                                      // a newer request replaced this one
     const keep = result && result.top[selected] ? result.top[selected].c : null;
     result = { top: r.top, relaxed: r.relaxed, people, seq: r.seq };
     result.top.forEach((x) => (x.est = { times: x.times.slice(), back: x.back.slice(), max: x.max, sum: x.sum }));   // the solver's own numbers, kept for the ballot
-    if (!result.top.length) { clearResult(); $("cards").innerHTML = '<div class="empty">No meeting point is reachable for everyone. Check that each person can reach the rail network with a mode they ticked.</div>'; return; }
+    if (!result.top.length) { clearResult(); $("cards").innerHTML = `<div class="empty">${tr("No meeting point is reachable for everyone. Check that each person can reach the rail network with a mode they ticked.")}</div>`; return; }
     const same = result.top.findIndex((r) => r.c === keep);
     result.relaxedLimit = result.relaxed ? o.maxmin : 0;
     renderCards(); renderPhase(); select(same >= 0 ? same : 0);
@@ -486,14 +491,14 @@
   /* what to do around a point: places to eat or drink, culture and sights, parks (all from the local data: instant) */
   function around(lat, lon) {
     const near = base.nearby(lat, lon, 350), label = { r: "Restaurant", c: "Café", b: "Bar" };
-    const food = [...near.filter((p) => p.t === "r").slice(0, 3), ...near.filter((p) => p.t === "c").slice(0, 2), ...near.filter((p) => p.t === "b").slice(0, 1)].map((p) => ({ name: p.name, what: label[p.t], d: p.d }));
-    const cult = culturePlaces.map((p) => ({ name: p.name, what: cap(p.sub || p.kind), d: metres(lat, lon, p.lat, p.lon) })).filter((p) => p.d <= 700).sort((x, y) => x.d - y.d);
-    const parks = (base.parkRaw || []).map((p) => ({ name: p[0], what: "Park", d: metres(lat, lon, p[1], p[2]) })).filter((p) => p.d <= 600).sort((x, y) => x.d - y.d);
+    const food = [...near.filter((p) => p.t === "r").slice(0, 3), ...near.filter((p) => p.t === "c").slice(0, 2), ...near.filter((p) => p.t === "b").slice(0, 1)].map((p) => ({ name: p.name, what: tr(label[p.t]), d: p.d }));
+    const cult = culturePlaces.map((p) => ({ name: p.name, what: kindLabel(p), d: metres(lat, lon, p.lat, p.lon) })).filter((p) => p.d <= 700).sort((x, y) => x.d - y.d);
+    const parks = (base.parkRaw || []).map((p) => ({ name: p[0], what: tr("Park"), d: metres(lat, lon, p[1], p[2]) })).filter((p) => p.d <= 600).sort((x, y) => x.d - y.d);
     return { eat: near.length, food, cult, parks };
   }
   function aroundHTML(lat, lon, open) {
     const a = around(lat, lon), line = (p) => `<li><b>${esc(p.name)}</b> · ${esc(p.what)} · ${Math.round(p.d / 10) * 10} m</li>`;
-    const summary = `${a.eat} to eat or drink · ${a.cult.length} culture and sights · ${a.parks.length} parks nearby`;
+    const summary = [trn(a.eat, "{n} place to eat or drink", "{n} places to eat or drink"), trn(a.cult.length, "{n} culture or sight", "{n} culture and sights"), trn(a.parks.length, "{n} park nearby", "{n} parks nearby")].join(" · ");
     if (!open) return `<div class="small muted">${summary}</div>`;
     const items = [...a.food, ...a.cult.slice(0, 3), ...a.parks.slice(0, 2)];
     return `<div class="around"><div class="small muted">${summary}</div>${items.length ? `<ul>${items.map(line).join("")}</ul>` : ""}</div>`;
@@ -506,37 +511,37 @@
     const inv = document.querySelector("#v-head .invite"); if (inv) inv.hidden = ph === "voting";
     if (ph === "voting") {
       const voted = Object.keys(votesOf()).length, n = S.ev.people.length, mine = votable(), v = voter();
-      el.innerHTML = `<h2>Vote for the meeting place</h2>
+      el.innerHTML = `<h2>${tr("Vote for the meeting place")}</h2>
         <div class="card stack">
-          <p class="small muted">Registration is closed. Pick the option you prefer: ${voted} of ${n} have voted.</p>
-          ${mine.length > 1 ? `<div class="field"><label>Voting as</label><select id="voter" class="select">${mine.map((p) => `<option value="${p.id}"${v && v.id === p.id ? " selected" : ""}>${esc(p.name)}</option>`).join("")}</select></div>` : ""}
-          ${!mine.length ? '<p class="small muted">You are not in this event, so you can only watch the vote.</p>' : ""}
-          ${S.admin ? '<button id="reopen" class="btn sm" style="align-self:flex-start" title="Back to registration. The votes are dropped.">← Reopen registration</button>' : ""}
+          <p class="small muted">${trn(voted, "Registration is closed. Pick the option you prefer: {voted} of {n} has voted.", "Registration is closed. Pick the option you prefer: {voted} of {n} have voted.", { voted, n })}</p>
+          ${mine.length > 1 ? `<div class="field"><label>${tr("Voting as")}</label><select id="voter" class="select">${mine.map((p) => `<option value="${p.id}"${v && v.id === p.id ? " selected" : ""}>${esc(p.name)}</option>`).join("")}</select></div>` : ""}
+          ${!mine.length ? `<p class="small muted">${tr("You are not in this event, so you can only watch the vote.")}</p>` : ""}
+          ${S.admin ? `<button id="reopen" class="btn sm" style="align-self:flex-start" title="${esc(tr("Back to registration. The votes are dropped."))}">${tr("← Reopen registration")}</button>` : ""}
         </div>`;
     } else if (S.admin) {
       el.innerHTML = `<div class="card stack">
-        <b>Everybody is in?</b>
-        <p class="small muted">Registration closes and everyone votes for one of the best 5 places. You can reopen it later.</p>
-        <button id="close-reg" class="btn primary" ${S.ev.people.length >= 2 && result && result.top.length ? "" : "disabled"}>Everyone is registered: start the vote</button></div>`;
-    } else el.innerHTML = '<p class="small muted">The organizer starts the vote once everybody has joined.</p>';
-    const h = document.querySelector("#v-results h2"); if (h) h.textContent = ph === "voting" ? "The top 5 places" : "Best meeting points";
+        <b>${tr("Everybody is in?")}</b>
+        <p class="small muted">${tr("Registration closes and everyone votes for one of the best 5 places. You can reopen it later.")}</p>
+        <button id="close-reg" class="btn primary" ${S.ev.people.length >= 2 && result && result.top.length ? "" : "disabled"}>${tr("Everyone is registered: start the vote")}</button></div>`;
+    } else el.innerHTML = `<p class="small muted">${tr("The organizer starts the vote once everybody has joined.")}</p>`;
+    const h = document.querySelector("#v-results h2"); if (h) h.textContent = ph === "voting" ? tr("The top 5 places") : tr("Best meeting points");
   }
   async function closeRegistration() {
-    if (!result || !result.top.length) return notice("No meeting point yet.", "warn");
-    if (!confirm("Close registration and start the vote? Nobody can join or change their position until you reopen it.")) return;
+    if (!result || !result.top.length) return notice(tr("No meeting point yet."), "warn");
+    if (!confirm(tr("Close registration and start the vote? Nobody can join or change their position until you reopen it."))) return;
     const ballot = result.top.slice(0, 5).map((r) => { const t = targetOf(r), e = r.est || r; return { name: t.name, lat: t.lat, lon: t.lon, kind: r.place ? r.place.kind : "station", sub: (r.place && r.place.sub) || "", times: e.times, back: e.back, max: e.max, sum: e.sum }; });
     try { await Api.post({ action: "close", id: S.ev.id, adminKey: S.admin, ballot }); S.editing = null; await refresh(); }
-    catch (e) { notice("Could not start the vote: " + e.message, "warn"); }
+    catch (e) { notice(tr("Could not start the vote: {m}", { m: errMsg(e) }), "warn"); }
   }
   async function reopenRegistration() {
-    if (!confirm("Go back to registration? The votes are dropped.")) return;
-    try { await Api.post({ action: "reopen", id: S.ev.id, adminKey: S.admin }); await refresh(); } catch (e) { notice("Could not reopen: " + e.message, "warn"); }
+    if (!confirm(tr("Go back to registration? The votes are dropped."))) return;
+    try { await Api.post({ action: "reopen", id: S.ev.id, adminKey: S.admin }); await refresh(); } catch (e) { notice(tr("Could not reopen: {m}", { m: errMsg(e) }), "warn"); }
   }
   async function castVote(b) {
     const p = voter(); if (!p) return;
     const cur = votesOf()[p.id];
     try { await Api.post({ action: "vote", id: S.ev.id, pid: p.id, token: S.mine[p.id], adminKey: S.admin, choice: cur === b ? null : b }); await refresh(); }
-    catch (e) { notice("Could not vote: " + e.message, "warn"); }
+    catch (e) { notice(tr("Could not vote: {m}", { m: errMsg(e) }), "warn"); }
   }
   /* the ballot is the list everybody was given; numbers come from this browser's own result when it is the same place (street-refined), else from the snapshot */
   function renderBallot() {
@@ -544,17 +549,17 @@
     const counts = B.map((_, i) => Object.values(votes).filter((c) => c === i).length), lead = Math.max(0, ...counts);
     $("cards").innerHTML = B.map((b, i) => {
       const li = result ? result.top.findIndex((r) => { const t = targetOf(r); return posKey(t.lat, t.lon) === posKey(b.lat, b.lon); }) : -1, r = li >= 0 ? result.top[li] : b;
-      const near = nearestStation(b.lat, b.lon), what = b.kind === "station" ? "" : (b.sub ? cap(b.sub) : KIND[b.kind] || "Place");
-      const sub = b.kind === "station" ? "" : `${what}${near ? " · near " + near[1] : ""}`, sel = li >= 0 && li === selected;
+      const near = nearestStation(b.lat, b.lon), what = b.kind === "station" ? "" : kindLabel(b);
+      const sub = b.kind === "station" ? "" : `${what}${near ? tr(" · near {s}", { s: near[1] }) : ""}`, sel = li >= 0 && li === selected;
       const voters = S.ev.people.map((p, pi) => (votes[p.id] === i ? `<span class="vdot" style="background:${COLORS[pi]}" title="${esc(p.name)}"></span>` : "")).join("");
       return `<div class="card res ${sel ? "on" : ""} ${mine === i ? "voted" : ""}" data-k="${li}" data-b="${i}" role="button" tabindex="0">
         <div class="t"><b>${esc(b.name)}</b><span class="rank">#${i + 1}</span></div>${sub ? `<div class="small muted" style="margin:-4px 0 6px">${esc(sub)}</div>` : ""}
         <div class="times">${S.ev.people.map((p, pi) => `
           <span style="color:${COLORS[pi]}">●</span><span class="bar" title="${esc(p.name)}"><i style="width:${Math.min(100, Math.max(r.times[pi] || 0, r.back[pi] || 0) / (r.max || 1) * 100)}%;background:${COLORS[pi]}"></i></span><span>${Math.round(r.times[pi])} min${S.ev.people[pi].ret && r.back && r.back[pi] ? ` · ↩ ${Math.round(r.back[pi])}` : ""}</span>`).join("")}</div>
-        <div class="meta">Longest ${Math.round(r.max)} min · average ${Math.round(r.sum / ((r.times.length + r.back.length) || 1))} min</div>
+        <div class="meta">${tr("Longest {max} min · average {avg} min", { max: Math.round(r.max), avg: Math.round(r.sum / ((r.times.length + r.back.length) || 1)) })}</div>
         ${aroundHTML(b.lat, b.lon, sel)}
-        <div class="votes ${counts[i] && counts[i] === lead ? "lead" : ""}"><span class="vcount">${counts[i]} vote${counts[i] === 1 ? "" : "s"}${counts[i] && counts[i] === lead ? " · leading" : ""}</span><span class="vdots">${voters}</span>
-          ${me ? `<button class="btn sm ${mine === i ? "primary" : ""}" data-vote="${i}">${mine === i ? "✓ Your vote" : "Vote"}</button>` : ""}</div>
+        <div class="votes ${counts[i] && counts[i] === lead ? "lead" : ""}"><span class="vcount">${trn(counts[i], "{n} vote", "{n} votes")}${counts[i] && counts[i] === lead ? tr(" · leading") : ""}</span><span class="vdots">${voters}</span>
+          ${me ? `<button class="btn sm ${mine === i ? "primary" : ""}" data-vote="${i}">${mine === i ? tr("✓ Your vote") : tr("Vote")}</button>` : ""}</div>
       </div>`;
     }).join("");
   }
@@ -562,13 +567,13 @@
     if (phase() === "voting" && S.ev.ballot) return renderBallot();
     if (!result) return;
     const relaxedLimit = result.relaxedLimit;
-    $("cards").innerHTML = (relaxedLimit ? `<div class="msg warn">Nobody could stay under ${relaxedLimit} min. Showing the closest options.</div>` : "") +
+    $("cards").innerHTML = (relaxedLimit ? `<div class="msg warn">${tr("Nobody could stay under {n} min. Showing the closest options.", { n: relaxedLimit })}</div>` : "") +
       result.top.map((r, k) => `
       <div class="card res ${k === selected ? "on" : ""}" data-k="${k}" role="button" tabindex="0">
         <div class="t"><b>${esc(targetOf(r).name)}</b><span class="rank">#${k + 1}</span></div>${targetOf(r).sub ? `<div class="small muted" style="margin:-4px 0 6px">${esc(targetOf(r).sub)}</div>` : ""}
         <div class="times">${S.ev.people.map((p, i) => `
           <span style="color:${COLORS[i]}">●</span><span class="bar" title="${esc(p.name)}"><i style="width:${Math.min(100, Math.max(r.times[i], r.back[i]) / (r.max || 1) * 100)}%;background:${COLORS[i]}"></i></span><span data-t="${k}-${i}">${Math.round(r.times[i])} min${result.people[i].ret ? ` · ↩ ${Math.round(r.back[i])}` : ""}</span>`).join("")}</div>
-        <div class="meta">Longest ${Math.round(r.max)} min · average ${Math.round(r.sum / (r.times.length + r.back.length))} min</div>
+        <div class="meta">${tr("Longest {max} min · average {avg} min", { max: Math.round(r.max), avg: Math.round(r.sum / (r.times.length + r.back.length)) })}</div>
       </div>`).join("");
   }
 
@@ -639,7 +644,7 @@
     const box = $("places"); if (!box) return;
     const near = base.nearby(st[2], st[3], 350), label = { r: "Restaurant", c: "Café", b: "Bar" };
     const items = [...near.filter((p) => p.t === "r").slice(0, 5), ...near.filter((p) => p.t === "c").slice(0, 3), ...near.filter((p) => p.t === "b").slice(0, 2)];
-    box.innerHTML = items.length ? `<h3>Around ${esc(st[1])}: ${near.length} places to eat or drink</h3><ul>${items.map((p) => `<li><b>${esc(p.name)}</b> · ${label[p.t]} · ${Math.round(p.d / 10) * 10} m</li>`).join("")}</ul>` : "";
+    box.innerHTML = items.length ? `<h3>${esc(tr("Around {name}: {n} places to eat or drink", { name: st[1], n: near.length }))}</h3><ul>${items.map((p) => `<li><b>${esc(p.name)}</b> · ${esc(tr(label[p.t]))} · ${Math.round(p.d / 10) * 10} m</li>`).join("")}</ul>` : "";
   }
 
   /* ---------- events from the panel (delegated, so re-rendering never loses handlers) ---------- */
@@ -651,7 +656,7 @@
     if (t.id === "home") return go(null);
     if (t.id === "copy-inv") return copyText(inviteUrl(), $("inv-url"));
     if (t.id === "copy-adm") return copyText(organizerUrl(), $("inv-url"));
-    if (t.id === "del") { if (confirm("Delete this event for everyone?")) { await Api.post({ action: "delete", id: S.ev.id, adminKey: S.admin }).catch(() => {}); const s = store(); delete s.events[S.ev.id]; putStore(s); go(null); } return; }
+    if (t.id === "del") { if (confirm(tr("Delete this event for everyone?"))) { await Api.post({ action: "delete", id: S.ev.id, adminKey: S.admin }).catch(() => {}); const s = store(); delete s.events[S.ev.id]; putStore(s); go(null); } return; }
     if (t.dataset.pick) return setPicking(S.picking === t.dataset.pick ? null : t.dataset.pick);
     if (t.dataset.geo) return geolocate(t.dataset.geo);
     if (t.id === "d-add") return addPerson();
@@ -703,7 +708,7 @@
     else if (t.id === "ev-title" && S.admin) { S.ev.title = t.value; saveOptionsSoon(); }
     else if (t.dataset.opt && t.type === "range") {      // live label while dragging, apply on release
       const o = S.ev ? S.ev.options : S.draftOpts; readOpt(t, o);
-      const lab = t.closest(".field").querySelector("label span.muted"); if (lab && t.dataset.opt === "maxmin") lab.textContent = o.maxmin ? o.maxmin + " min" : "no limit";
+      const lab = t.closest(".field").querySelector("label span.muted"); if (lab && t.dataset.opt === "maxmin") lab.textContent = o.maxmin ? o.maxmin + " min" : tr("no limit");
     }
   });
   view.addEventListener("change", (e) => {
@@ -723,19 +728,19 @@
   });
 
   function geolocate(ak) {
-    if (!navigator.geolocation) return notice("Location is not available in this browser.", "warn");
+    if (!navigator.geolocation) return notice(tr("Location is not available in this browser."), "warn");
     navigator.geolocation.getCurrentPosition((pos) => {
       const { latitude: la, longitude: lo } = pos.coords;
-      if (la < 47.9 || la > 49.5 || lo < 1.2 || lo > 3.9) return notice("Your location is outside Île-de-France.", "warn");
+      if (la < 47.9 || la > 49.5 || lo < 1.2 || lo > 3.9) return notice(tr("Your location is outside Île-de-France."), "warn");
       setPos(ak, la, lo, "");
-    }, () => notice("Could not get your location. Type an address instead.", "warn"), { timeout: 8000 });
+    }, () => notice(tr("Could not get your location. Type an address instead."), "warn"), { timeout: 8000 });
   }
   async function createEvent() {
-    const title = ($("f-title").value || "").trim() || "Meet-up";
+    const title = ($("f-title").value || "").trim() || tr("Meet-up");
     try {
       const r = await Api.post({ action: "create", title, options: S.draftOpts });
       setLocal(r.id, { title, admin: r.adminKey, mine: {} }); S.title = ""; go(r.id);
-    } catch (e) { notice("Could not create the event: " + (e.message || e) + (S.api ? "" : ". The event server (api/meetup.php) is not reachable."), "warn"); }
+    } catch (e) { notice(tr("Could not create the event: {m}", { m: errMsg(e) }) + (S.api ? "" : tr(". The event server (api/meetup.php) is not reachable.")), "warn"); }
   }
   function go(id) { history.pushState(null, "", id ? "?e=" + id : location.pathname); route(); }
   addEventListener("popstate", route);
@@ -745,9 +750,9 @@
     if (id && q.get("k")) { setLocal(id, { admin: q.get("k") }); history.replaceState(null, "", "?e=" + id); }
     if (q.get("import")) {                                // ?import=id.key,id.key: remember several events as organizer (see tools/seed_events.py)
       let n = 0;
-      for (const part of q.get("import").split(",")) { const [eid, k] = part.split("."); if (/^[a-z0-9]{8}$/.test(eid) && k) { setLocal(eid, { admin: k, title: getLocal(eid).title || "Event " + eid }); n++; } }   // placeholder title: listed at once, the real one follows
+      for (const part of q.get("import").split(",")) { const [eid, k] = part.split("."); if (/^[a-z0-9]{8}$/.test(eid) && k) { setLocal(eid, { admin: k, title: getLocal(eid).title || tr("Event {id}", { id: eid }) }); n++; } }   // placeholder title: listed at once, the real one follows
       history.replaceState(null, "", location.pathname);
-      setTimeout(() => { const left = Object.keys(store().events).length; if (!document.getElementById("notice").textContent) notice(storageOk() ? `Remembered ${n} event${n === 1 ? "" : "s"} in this browser (${left} in the list).` : "This browser blocks site storage, so it cannot remember events. Allow cookies and site data for this address.", storageOk() ? "ok" : "warn"); }, 0);
+      setTimeout(() => { const left = Object.keys(store().events).length; if (!document.getElementById("notice").textContent) notice(storageOk() ? trn(n, "Remembered {n} event in this browser ({left} in the list).", "Remembered {n} events in this browser ({left} in the list).", { left }) : tr("This browser blocks site storage, so it cannot remember events. Allow cookies and site data for this address."), storageOk() ? "ok" : "warn"); }, 0);
     }
     return id ? openEvent(id) : showHome();
   }
@@ -756,7 +761,7 @@
   /* ---------- full reload: fetch every file past the browser cache, then reload ---------- */
   const DATA_FILES = ["graph", "graph-bus", "rail-lines", "bus-lines", "roads", "roads-detail", "water", "green", "places", "pois"];
   async function hardReload() {
-    notice("Re-downloading everything…");
+    notice(tr("Re-downloading everything…"));
     const urls = [location.pathname, "index.html"].concat(
       [...document.querySelectorAll("script[src], link[rel=stylesheet]")].map((el) => el.src || el.href).filter((u) => u.startsWith(location.origin)),
       DATA_FILES.map(dataUrl));
@@ -774,11 +779,11 @@
       const j = await (await fetch("api/build.php", { cache: "no-store" })).json();
       if (!j.build || j.build === BUILD) return;
       let tried = null; try { tried = sessionStorage.getItem("meetpoint:reloaded"); } catch (e) {}
-      if (tried === j.build) return notice('A new version is installed, but this browser still shows the old one. Use "Reload everything" below.', "warn");   // never loop
+      if (tried === j.build) return notice(tr('A new version is installed, but this browser still shows the old one. Use "Reload everything" below.'), "warn");   // never loop
       const f = document.activeElement, typing = f && /^(INPUT|TEXTAREA|SELECT)$/.test(f.tagName) && f.closest("#view");
       if (typing || (S.draft && (S.draft.name || S.draft.lat !== null))) {          // do not throw away what someone is filling in
-        notice("A new version is available. Finish what you are doing, then ", "warn");
-        const b = document.createElement("button"); b.className = "link"; b.textContent = "reload"; b.onclick = () => location.reload(); $("notice").append(b); return;
+        notice(tr("A new version is available. Finish what you are doing, then "), "warn");
+        const b = document.createElement("button"); b.className = "link"; b.textContent = tr("reload"); b.onclick = () => location.reload(); $("notice").append(b); return;
       }
       try { sessionStorage.setItem("meetpoint:reloaded", j.build); } catch (e) {}
       location.reload();
@@ -790,14 +795,16 @@
 
   /* ---------- boot ---------- */
   (async function () {
+    I18n.applyStatic();
+    document.querySelectorAll("#lang button").forEach((b) => { b.onclick = () => I18n.setLang(b.dataset.lang); });
     base.setStations({ stations: [], lnodes: [] });
     loadBasemap(); renderLegend();
     const ping = await Api.ping(); S.api = ping.ok;
     try {
       graphBase = await fetch(dataUrl("graph")).then((r) => r.json()); base.setStations(graphBase);
-    } catch (e) { notice("Could not load data/graph.json. Run tools/build_graph.py first.", "warn"); }
+    } catch (e) { notice(tr("Could not load data/graph.json. Run tools/build_graph.py first."), "warn"); }
     await route();
-    if (!storageOk()) notice("This browser blocks site storage, so it cannot remember your events or your organizer key. Allow cookies and site data for this address.", "warn");
-    if (!S.api) notice(`Can't reach the event server (${ping.why}). Serve this folder with PHP (see README). If it is running, a content blocker may be blocking api/meetup.php.`, "warn");
+    if (!storageOk()) notice(tr("This browser blocks site storage, so it cannot remember your events or your organizer key. Allow cookies and site data for this address."), "warn");
+    if (!S.api) notice(tr("Can't reach the event server ({why}). Serve this folder with PHP (see README). If it is running, a content blocker may be blocking api/meetup.php.", { why: ping.why }), "warn");
   })();
 })();
