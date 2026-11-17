@@ -75,6 +75,8 @@ minimize the longest trip, restaurants nearby), a nice flow animation, and the *
   a click selects it and zooms the map there (a second click zooms back out), the organizer keeps the "Reopen registration" control; people, add form, settings and invite are hidden.
 - Results are now the top 5 everywhere (they were 3).
 - API: `close`, `vote`, `reopen` (see api/meetup.php); smoke test covers phases, permissions and locks; e2e runs organizer + guest through the whole vote.
+- **"Your events" list**: it is the browser's own memory (localStorage), so deleted events stayed listed and events created on the server were unknown to it. The home page now asks the server about every remembered event, forgets the ones that no longer exist and refreshes titles; `?import=id.key,id.key` remembers several events as organizer in one click.
+- `tools/seed_events.py [base-url]` creates five sample events (random but repeatable) and prints organizer and guest links plus one import link.
 
 ## Not done / ideas
 - Live traffic and real-time departures: **decided against** (2026-11-17). It needs the transport authority's API key (so a server-side proxy), rate-limit handling and per-person queries that cannot be precomputed, which breaks the "basic server, everything in the browser" design; the timetable model is already within a few minutes.

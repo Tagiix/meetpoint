@@ -149,6 +149,19 @@ if (existsSync(css)) {
 await A.click('#hard-reload'); await A.waitForSelector('#copy-adm', { timeout: 20000 });
 check('still organizer after a full reload', (await A.locator('#copy-adm').count()) === 1);
 
+// "Your events" forgets deleted events, and an import link remembers events as organizer
+{
+  const fresh = await (await browser.newContext({ viewport: { width: 1200, height: 800 } })).newPage();
+  const adminKey0 = await A.evaluate((i) => JSON.parse(localStorage.getItem('meetpoint:v2')).events[i].admin, id);
+  await fresh.goto(BASE + '?import=' + id + '.' + adminKey0 + ',zzzzzzzz.nokey'); await fresh.waitForSelector('#create');
+  await fresh.waitForFunction(() => document.querySelector('#home-events')?.textContent.includes('E2E event'), null, { timeout: 15000 });
+  check('an import link adds the event as organizer', /E2E event\s*organizer/.test(await fresh.locator('#home-events').textContent()));
+  await fresh.waitForTimeout(1000);
+  const after = await fresh.evaluate(() => Object.keys(JSON.parse(localStorage.getItem('meetpoint:v2')).events));
+  check('an event that does not exist is forgotten, a real one kept', !after.includes('zzzzzzzz') && after.includes(id));
+  await fresh.close();
+}
+
 // clean up: delete the event with the organizer key the browser stored
 const adminKey = await A.evaluate((i) => JSON.parse(localStorage.getItem('meetpoint:v2')).events[i].admin, id);
 const del = await fetch(BASE + 'api/meetup.php', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', id, adminKey }) }).then((r) => r.json());

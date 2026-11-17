@@ -176,7 +176,6 @@
   function showHome() {
     clearTimeout(pollTimer); S.ev = null; S.admin = null; S.mine = {}; S.editing = null; S.draft = blankDraft();
     document.title = "Meet Point"; clearResult(); renderMarkers(); renderDraftMarkers();
-    const evs = Object.entries(store().events).filter(([, e]) => e.title);
     $("view").innerHTML = `
       <section><h2>Plan a meet-up</h2>
         <div class="card stack">
@@ -186,7 +185,23 @@
         </div>
         ${S.api ? '<p class="small muted">You get a link to send around. Everyone who opens it adds their own position, and the best meeting point updates live.</p>' : ""}
       </section>
-      ${evs.length ? `<section><h2>Your events</h2><ul class="stack" style="gap:8px">${evs.map(([id, e]) => `<li><button class="btn block" data-open="${id}" style="justify-content:space-between"><span>${esc(e.title)}</span><span class="muted small">${e.admin ? "organizer" : "guest"}</span></button></li>`).join("")}</ul></section>` : ""}`;
+      <div id="home-events">${homeEvents()}</div>`;
+    syncStoredEvents();
+  }
+  /* "Your events": what this browser remembers (titles and keys live in localStorage) */
+  function homeEvents() {
+    const evs = Object.entries(store().events).filter(([, e]) => e.title);
+    return evs.length ? `<section><h2>Your events</h2><ul class="stack" style="gap:8px">${evs.map(([id, e]) => `<li><button class="btn block" data-open="${id}" style="justify-content:space-between"><span>${esc(e.title)}</span><span class="muted small">${e.admin ? "organizer" : "guest"}</span></button></li>`).join("")}</ul></section>` : "";
+  }
+  /* ask the server about every remembered event: forget the ones that no longer exist, refresh the titles (also names events added by an import link) */
+  async function syncStoredEvents() {
+    const st = store(); let changed = false;
+    await Promise.all(Object.keys(st.events).map(async (id) => {
+      try { const e = await Api.get(id); if (st.events[id].title !== e.title) { st.events[id].title = e.title; changed = true; } }
+      catch (err) { if (/not found/.test(err.message)) { delete st.events[id]; changed = true; } }          // other errors (offline...): keep it
+    }));
+    if (!changed) return;
+    putStore(st); const box = $("home-events"); if (box && !S.ev) box.innerHTML = homeEvents();
   }
 
   function showEvent() {
@@ -722,6 +737,10 @@
     notice(""); setPicking(null);
     const q = new URLSearchParams(location.search), id = q.get("e");
     if (id && q.get("k")) { setLocal(id, { admin: q.get("k") }); history.replaceState(null, "", "?e=" + id); }
+    if (q.get("import")) {                                // ?import=id.key,id.key: remember several events as organizer (see tools/seed_events.py)
+      for (const part of q.get("import").split(",")) { const [eid, k] = part.split("."); if (/^[a-z0-9]{8}$/.test(eid) && k) setLocal(eid, { admin: k }); }
+      history.replaceState(null, "", location.pathname);
+    }
     return id ? openEvent(id) : showHome();
   }
   document.addEventListener("click", (e) => document.querySelectorAll(".suggest").forEach((b) => { if (!b.parentNode.contains(e.target)) b.hidden = true; }));
