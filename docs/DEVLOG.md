@@ -52,6 +52,7 @@ minimize the longest trip, restaurants nearby), a nice flow animation, and the *
 - **Automatic updates.** `index.php` stamps every asset and data URL with a build id (hash of file sizes and mtimes, `api/_build.inc.php`); the open page asks `api/build.php` every minute and when the
   tab is shown again, and reloads itself on a change (it waits, with a "reload" link, if someone is typing or has a half-filled form; a sessionStorage guard prevents reload loops). No build step, any PHP server.
 - **Address dropdown**: stations (rail, and bus stops once loaded) are matched locally and shown instantly above the address results, ignoring case, accents, apostrophes and spaces; keyboard: arrows, Tab/Shift+Tab, Enter (first entry if none highlighted), Escape.
+- **"Far east" results (user report)**: not reproducible on a fresh load (about 1,500 random western groups gave none); the owner confirmed they were caused by stale cached files from before an update. Prevented by the auto-update (versioned URLs).
 
 ## Not done / ideas
 - **Next step: solve in a Web Worker.** Solving with buses on takes ~250 ms on the page's own thread (rail only: ~10 ms), freezing the page on every change. `assets/solver.js` is pure, so it can run in a worker: the graph and `Network` would live there, the page sends people and options and gets the ranking back, and asks the worker for the itinerary of the selected result (it is rebuilt from the solver's internal Dijkstra data). Needs: message plumbing both ways, a fallback to the main thread if the worker fails to start, tests. Worth doing if buses-on is used a lot.
@@ -60,4 +61,4 @@ minimize the longest trip, restaurants nearby), a nice flow animation, and the *
 - Activity filter (parks, culture, cinemas) beyond food and drink; French interface.
 - Rate limiting; event expiry is only 90 days after last write.
 - A licence file for the repository.
-- Confirm the "Create" issue is gone in Zen/Firefox; run the e2e test in Firefox (`playwright install firefox` worked, but headless launch failed in the sandbox).
+- Confirm the "Create" issue is gone in Zen/Firefox (Firefox still will not launch headless in the dev sandbox: "Could not find profile folder", also with TMPDIR redirected); run the e2e test in Firefox (`playwright install firefox` worked, but headless launch failed in the sandbox).
