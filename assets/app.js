@@ -10,8 +10,10 @@
   const IDF = /^(75|77|78|91|92|93|94|95)/;
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-  const DEFAULT_OPTS = { objective: "max", where: "stations", profile: 0, maxmin: 0, buses: false };
-  const WHERE = [["stations", "A station"], ["places", "Any place"]];
+  const DEFAULT_OPTS = { objective: "max", meet: ["station"], profile: 0, maxmin: 0, buses: false };
+  // what may be a meeting point; several can be ticked together
+  const MEET = [["station", "Stations"], ["r", "Restaurants"], ["c", "Cafés"], ["b", "Bars"], ["park", "Parks"], ["culture", "Culture"], ["sights", "Sights"]];
+  const meetOf = (o) => (o.meet && o.meet.length ? o.meet : o.where === "places" ? ["r", "c", "b", "park"] : ["station"]);   // old events had where = stations | places
   const DEFAULT_MODES = { walk: true, transit: true, bike: false, car: false };
 
   /* ---------- state ---------- */
@@ -104,14 +106,16 @@
   }
 
   /* what a result row points at: a station, or a place (café, restaurant, bar, park) */
-  const KIND = { r: "Restaurant", c: "Café", b: "Bar", park: "Park" };
+  const KIND = { station: "Station", r: "Restaurant", c: "Café", b: "Bar", park: "Park", culture: "Culture", sights: "Sight" };
+  const cap = (x) => x.charAt(0).toUpperCase() + x.slice(1);
   function nearestStation(lat, lon) {
     let best = null, bd = Infinity;
     for (let i = 0; i < (graphBase.railCount || graphBase.stations.length); i++) { const st = graphBase.stations[i], d = Math.hypot((st[2] - lat) * 111, (st[3] - lon) * 73); if (d < bd) { bd = d; best = st; } }
     return best;
   }
   function targetOf(r) {
-    if (r.place) { const near = nearestStation(r.place.lat, r.place.lon); return { name: r.place.name, lat: r.place.lat, lon: r.place.lon, sub: `${KIND[r.place.kind] || "Place"}${near ? " · near " + near[1] : ""}` }; }
+    if (r.place && r.place.kind !== "station") { const near = nearestStation(r.place.lat, r.place.lon), what = r.place.sub ? cap(r.place.sub) : KIND[r.place.kind] || "Place"; return { name: r.place.name, lat: r.place.lat, lon: r.place.lon, sub: `${what}${near ? " · near " + near[1] : ""}` }; }
+    if (r.place) return { name: r.place.name, lat: r.place.lat, lon: r.place.lon, sub: "" };
     const st = graphBase.stations[r.c]; return { name: st[1], lat: st[2], lon: st[3], sub: "" };
   }
   function targetPoint() { const t = targetOf(result.top[selected]); return [t.lat, t.lon]; }
@@ -150,8 +154,8 @@
         <div class="seg ${editable ? "edit" : ""}">${OBJECTIVES.map(([v, l, t]) => `<button type="button" data-opt="objective" data-v="${v}" title="${esc(t)}" class="${o.objective === v ? "on" : ""}"${dis}>${l}</button>`).join("")}</div>
         <p class="small muted">${obj[2]}</p></div>
       <div class="field"><label>Meet at</label>
-        <div class="seg ${editable ? "edit" : ""}">${WHERE.map(([v, l]) => `<button type="button" data-opt="where" data-v="${v}" class="${(o.where || "stations") === v ? "on" : ""}"${dis}>${l}</button>`).join("")}</div>
-        <p class="small muted">${(o.where || "stations") === "places" ? "Any named café, restaurant, bar or park. People on public transport get off at the nearest stop and walk (up to 15 min); the others go straight there." : "A metro, RER, train or tram station."}</p></div>
+        <div class="chips">${MEET.map(([k, l]) => `<button type="button" class="chip ${meetOf(o).includes(k) ? "on" : ""}" data-meet="${k}" aria-pressed="${meetOf(o).includes(k)}"${dis}>${l}</button>`).join("")}</div>
+        <p class="small muted">${meetOf(o).length === 1 && meetOf(o)[0] === "station" ? "A metro, RER, train or tram station." : "Tick any mix. Stations are the quickest for public transport; other places add a walk from the nearest stop (up to 15 min), while people on foot, by bike or by car go straight there. Results are at least 500 m apart."}</p></div>
       <div class="field"><label>Day</label>
         <div class="seg ${editable ? "edit" : ""}">${[["0", "Weekday"], ["1", "Weekend"]].map(([v, l]) => `<button type="button" data-opt="profile" data-v="${v}" class="${String(o.profile) === v ? "on" : ""}"${dis}>${l}</button>`).join("")}</div></div>
       <label class="switch"><span>Include buses in trips<br><span class="small muted">Loads more data, a bit slower</span></span><input type="checkbox" data-opt="buses" ${o.buses ? "checked" : ""}${dis}></label>
@@ -429,7 +433,7 @@
     const people = ps.map((p) => Object.assign({}, p, { ret: hasRet(p) ? p.ret : null }));
     if (o.buses && !busWarm) notice("Loading the bus network…");
     let r;
-    try { r = await engine.solve({ profile: o.profile, buses: o.buses }, people, { objective: o.objective, maxMinutes: o.maxmin, top: 3, where: o.where }); }
+    try { r = await engine.solve({ profile: o.profile, buses: o.buses }, people, { objective: o.objective, maxMinutes: o.maxmin, top: 3, meet: meetOf(o) }); }
     catch (e) { return notice("Could not compute the meeting point (" + e.message + ")." + (o.buses ? " Turn buses off or run tools/build_bus.py." : ""), "warn"); }
     if (o.buses && !busWarm) { busWarm = true; notice(""); }
     if (!r) return;                                      // a newer request replaced this one
@@ -547,6 +551,12 @@
     if (p && t.dataset.act === "edit") { S.editing = S.editing === p.id ? null : p.id; return renderPeople(); }
     if (p && (t.dataset.act === "remove" || t.dataset.act === "leave")) return removePerson(p);
     if (p && t.dataset.m) { p.modes[t.dataset.m] = !p.modes[t.dataset.m]; renderPeople(); return savePerson(p); }
+    if (t.dataset.meet) {                              // ticking what may be a meeting point (at least one stays on)
+      const o = S.ev ? S.ev.options : S.draftOpts; if (S.ev && !S.admin) return;
+      const set = new Set(meetOf(o)); set.has(t.dataset.meet) ? set.delete(t.dataset.meet) : set.add(t.dataset.meet);
+      if (!set.size) return; delete o.where; o.meet = MEET.map(([k]) => k).filter((k) => set.has(k));
+      return S.ev ? (renderOpts(), saveOptionsSoon(), scheduleSolve()) : (document.getElementById("home-opts").innerHTML = optionsHTML(S.draftOpts, true));
+    }
     if (t.dataset.opt) {                               // option buttons (organizer or home form)
       const o = S.ev ? S.ev.options : S.draftOpts; if (S.ev && !S.admin) return;
       readOpt(t, o); return S.ev ? (renderOpts(), saveOptionsSoon(), scheduleSolve()) : (document.getElementById("home-opts").innerHTML = optionsHTML(S.draftOpts, true));

@@ -84,14 +84,18 @@ await A.waitForFunction(() => /↩/.test(document.querySelector('.res')?.textCon
 check('result cards show the way back', true);
 await A.locator('.person[data-pid]').nth(0).locator('[data-act=edit]').click();
 
-// meeting at any place (café, restaurant, bar, park) instead of a station
-await A.click('button[data-opt=where][data-v=places]'); await A.waitForTimeout(2500);
-check('"Meet at: any place" saved', (await event()).options.where === 'places');
+// what may be a meeting point: tick cafés and culture on top of stations, then only cafés
+await A.click('button[data-meet=c]'); await A.click('button[data-meet=culture]'); await A.waitForTimeout(2500);
+check('meet options saved', JSON.stringify((await event()).options.meet) === JSON.stringify(['station', 'c', 'culture']));
+await A.click('button[data-meet=station]'); await A.click('button[data-meet=culture]'); await A.waitForTimeout(2500);
+check('only cafés left', JSON.stringify((await event()).options.meet) === JSON.stringify(['c']));
 const sub = await A.locator('.res .small.muted').first().textContent().catch(() => '');
-check('results are places, with the nearest station', /(Restaurant|Café|Bar|Park) · near /.test(sub), sub);
+check('results are cafés, with the nearest station', /Café · near /.test(sub), sub);
+await A.click('button[data-meet=c]');                         // the last one cannot be switched off
+check('the last option stays on', JSON.stringify((await event()).options.meet) === JSON.stringify(['c']));
 await A.screenshot({ path: 'shots/any-place.png' });
-await A.click('button[data-opt=where][data-v=stations]'); await A.waitForTimeout(1500);
-check('back to stations', (await event()).options.where === 'stations');
+await A.click('button[data-meet=station]'); await A.click('button[data-meet=c]'); await A.waitForTimeout(1500);
+check('back to stations', JSON.stringify((await event()).options.meet) === JSON.stringify(['station']));
 
 // organizer changes a setting; guest edits their own entry; organizer removes the guest
 await A.click('button[data-opt=objective][data-v=balanced]'); await A.waitForTimeout(1000);

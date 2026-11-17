@@ -26,5 +26,13 @@ const data = (n) => JSON.parse(fs.readFileSync(path.join(__dirname, "../data", n
   assert.strictEqual(core.itineraries(2, noRet.top[0].c).back, null, "no way-back address, no return legs");
   for (let s = 3; s <= 6; s++) await core.solve(s, { profile: 0, buses: false }, people, opts);
   assert.throws(() => core.itineraries(1, 0), /stale/, "old solves are forgotten");
+  // meet = kinds of meeting point; the engine loads the place data itself
+  for (const [meet, kinds] of [[["culture"], ["culture"]], [["station", "c"], ["station", "c"]], [["sights", "park"], ["sights", "park"]]]) {
+    const r = await core.solve(100, { profile: 0, buses: false }, people, { objective: "max", maxMinutes: 0, top: 3, meet });
+    assert(r.top.length > 0 && r.top.every((x) => kinds.includes(x.place.kind)), "only the ticked kinds come back: " + meet);
+    const it = core.itineraries(100, r.top[0].c); assert.strictEqual(it.out.length, 3);
+  }
+  const cu = await core.solve(101, { profile: 0, buses: false }, people, { objective: "max", maxMinutes: 0, top: 3, meet: ["culture"] });
+  assert(cu.top[0].place.sub, "culture places say what they are (museum, cinema...)");
   console.log("engine ok");
 })().catch((e) => { console.error(e); process.exit(1); });

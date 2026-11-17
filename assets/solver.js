@@ -156,16 +156,22 @@
     }
     return out;
   }
-  /* places: [{name, lat, lon, kind}] -> same list with the nearby stops worked out once (shared by every person) */
-  function placeCandidates(net, places) {
-    if (net._cands && net._cands.src === places) return net._cands.list;
-    const list = places.map((x) => Object.assign({}, x, { near: stopsNear(net, x.lat, x.lon) }));
-    net._cands = { src: places, list }; return list;
+  /* The candidate list: optionally every rail station, then the given places ([{name, lat, lon, kind}]), each with its nearby stops
+     worked out once (shared by every person). A station entry has kind "station" and s = its index; its time needs no walk. */
+  function placeCandidates(net, places, withStations) {
+    net._cands = net._cands || new Map();
+    const memo = net._cands.get(withStations ? 1 : 0);
+    if (memo && memo.src === places) return memo.list;
+    const st = net.graph.stations, list = [];
+    if (withStations) for (let i = 0; i < net.R; i++) list.push({ kind: "station", name: st[i][1], lat: st[i][2], lon: st[i][3], s: i, hub: st[i][4], near: [] });
+    for (const x of places) list.push(Object.assign({}, x, { near: stopsNear(net, x.lat, x.lon) }));
+    net._cands.set(withStations ? 1 : 0, { src: places, list }); return list;
   }
-  function placeSeconds(res, cands) {                 // Float64Array: this person's time to every candidate place
+  function placeSeconds(res, cands) {                 // Float64Array: this person's time to every candidate
     if (res.placeSec) return res.placeSec;
     const p = res.person, here = [p.lat, p.lon], out = new Float64Array(cands.length).fill(Infinity), tr = res.tr;
     cands.forEach((x, i) => {
+      if (x.s !== undefined) { out[i] = res.sec[x.s]; return; }
       let best = Infinity;
       for (const mode of res.direct) { const t = directSeconds(mode, here, [x.lat, x.lon]); if (t < best) best = t; }
       if (tr) for (const n of x.near) { const t = tr.dist[n.s] + n.sec; if (t < best) best = t; }
@@ -178,14 +184,16 @@
      Both directions count as separate trips in every score, so a person who returns to the same
      address simply counts twice (max and balanced are unchanged, sum is doubled for everybody alike).
      The way back is timed as the way there from that address (the network is symmetric enough).
-     opts: {objective, maxMinutes, top, places}. With opts.places ([{name, lat, lon, kind}]) the candidates are those places instead
-     of the stations; a row's c is then an index into places and row.place is the place. */
+     opts: {objective, maxMinutes, top, places, stations}. By default the candidates are the rail stations. With opts.places
+     ([{name, lat, lon, kind}]) they are those places, plus the stations when opts.stations is true; a row's c is then an index into the
+     candidate list (res.cands) and row.place says what it is: {name, lat, lon, kind, sub?}. */
   function solve(net, people, opts) {
     opts = Object.assign({ objective: "max", maxMinutes: 0, top: 3, places: null }, opts);
+    const withStations = opts.stations !== undefined ? opts.stations : !opts.places;
     const per = people.map(p => personTimes(net, p));
     const back = people.map((p, i) => p.ret ? personTimes(net, Object.assign({}, p, { ret: null, lat: p.ret.lat, lon: p.ret.lon })) : per[i]);
     const w = people.map(p => p.weight || 1), ww = w.concat(w), st = net.graph.stations;
-    const cands = opts.places ? placeCandidates(net, opts.places) : null;
+    const cands = opts.places ? placeCandidates(net, opts.places, withStations) : null;
     const secOut = cands ? per.map(r => placeSeconds(r, cands)) : per.map(r => r.sec);
     const secBack = cands ? back.map(r => placeSeconds(r, cands)) : back.map(r => r.sec);
     const rows = [];
@@ -193,17 +201,19 @@
       const out = secOut.map(a => a[c] / 60), ret = secBack.map(a => a[c] / 60), t = out.concat(ret);
       if (t.some(x => !isFinite(x))) continue;
       const max = Math.max(...t);
-      rows.push({ c, hub: cands ? c : st[c][4], score: AGG[opts.objective](t, ww), times: out, back: ret, sum: t.reduce((a, b) => a + b, 0), max, over: opts.maxMinutes > 0 && max > opts.maxMinutes });
+      rows.push({ c, hub: cands ? (cands[c].hub !== undefined ? cands[c].hub : -1 - c) : st[c][4], score: AGG[opts.objective](t, ww), times: out, back: ret, sum: t.reduce((a, b) => a + b, 0), max, over: opts.maxMinutes > 0 && max > opts.maxMinutes });
     }
     let pool = rows.filter(r => !r.over), relaxed = false;
     if (!pool.length) { pool = rows; relaxed = true; }
     pool.sort((a, b) => a.score - b.score);
     const seen = new Set(), top = [];
     for (const r of pool) {
-      if (cands) {                                      // places: keep the best, skip any within 500 m of one already kept
+      if (cands) {                                      // keep the best; skip stations of a hub already kept and anything within 500 m of one kept
         const x = cands[r.c];
+        if (x.kind === "station" && seen.has(r.hub)) continue;
         if (top.some(q => hav([x.lat, x.lon], [cands[q.c].lat, cands[q.c].lon]) < 500)) continue;
-        r.place = { name: x.name, lat: x.lat, lon: x.lon, kind: x.kind };
+        if (x.kind === "station") seen.add(r.hub);
+        r.place = { name: x.name, lat: x.lat, lon: x.lon, kind: x.kind, sub: x.sub };
       } else { if (seen.has(r.hub)) continue; seen.add(r.hub); }
       top.push(r); if (top.length >= opts.top) break;
     }
@@ -251,6 +261,7 @@
 
   /* Itinerary to a meeting place (an entry of the candidate list): straight there, or public transport to the best stop and a walk. */
   function itineraryPlace(net, res, cands, c) {
+    if (cands[c].s !== undefined) return itinerary(net, res, cands[c].s);          // a station: the usual itinerary
     const x = cands[c], p = res.person, here = [p.lat, p.lon], there = [x.lat, x.lon], NAME = { 1: "walk", 2: "bike", 3: "car" };
     let best = { t: Infinity };
     for (const mode of res.direct) { const t = directSeconds(mode, here, there); if (t < best.t) best = { t, mode }; }

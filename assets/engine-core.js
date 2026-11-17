@@ -6,6 +6,7 @@
   "use strict";
   function createCore(loadJson) {
     let base = null, bus = null, placeList = null;
+    const subsets = new Map();                         // place lists by kinds, so the solver can recognise a list it has already prepared
     const nets = {}, kept = new Map();                 // networks by profile+buses; the last few solves, by sequence number, for itineraries
     async function network(o) {
       const key = o.profile + (o.buses ? "b" : "r");
@@ -15,21 +16,28 @@
       if (o.buses) { bus = bus || await loadJson("graph-bus"); g = root.MP.mergeGraph(base, bus); }
       return (nets[key] = new root.MP.Network(g, o.profile));
     }
-    /* candidate meeting places that are not stops: named restaurants, cafés, bars and parks (the same data the map draws) */
+    /* every candidate meeting place that is not a stop. kind: r restaurant, c café, b bar, park, culture (museums, theatres, cinemas,
+       libraries...), sights (attractions, monuments, castles...); sub is the precise type where there is one */
     async function places() {
       if (placeList) return placeList;
-      const [pois, green] = await Promise.all([loadJson("pois"), loadJson("green")]);
+      const [pois, green, culture] = await Promise.all([loadJson("pois"), loadJson("green"), loadJson("culture").catch(() => ({}))]);
       const list = [];
       for (const kind of ["r", "c", "b"]) for (const p of pois[kind] || []) if (p[2]) list.push({ name: p[2], lat: p[0], lon: p[1], kind });
       for (const g of green.names || []) list.push({ name: g[0], lat: g[1], lon: g[2], kind: "park" });
+      for (const kind of ["culture", "sights"]) for (const p of culture[kind] || []) list.push({ name: p[2], lat: p[0], lon: p[1], kind, sub: p[3] });
       return (placeList = list);
     }
+    async function placesOf(kinds) {                    // the list for a set of kinds; the same array every time for the same set
+      const key = kinds.slice().sort().join(",");
+      if (!subsets.has(key)) { const all = await places(); subsets.set(key, all.filter((x) => kinds.includes(x.kind))); }
+      return subsets.get(key);
+    }
     return {
-      /* people: [{lat, lon, modes, weight, ret}], opts: {objective, maxMinutes, top, where: "stations" | "places"}.
-         Returns {top, relaxed}: the heavy per-candidate table stays here. */
+      /* people: [{lat, lon, modes, weight, ret}], opts: {objective, maxMinutes, top, meet: ["station", "r", "c", "b", "park", "culture", "sights"]}.
+         meet says what may be a meeting point (default: stations). Returns {top, relaxed}: the heavy per-candidate table stays here. */
       async solve(seq, o, people, opts) {
-        const net = await network(o), where = opts.where === "places";
-        const res = root.MP.solve(net, people, Object.assign({}, opts, { places: where ? await places() : null }));
+        const net = await network(o), meet = opts.meet && opts.meet.length ? opts.meet : ["station"], kinds = meet.filter((k) => k !== "station");
+        const res = root.MP.solve(net, people, Object.assign({}, opts, { places: kinds.length ? await placesOf(kinds) : null, stations: meet.includes("station") }));
         kept.set(seq, { net, res });
         for (const k of kept.keys()) if (k <= seq - 3) kept.delete(k);
         return { top: res.top, relaxed: res.relaxed };

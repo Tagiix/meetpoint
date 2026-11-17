@@ -149,3 +149,18 @@ console.log("scoring and way-back ok");
   assert(MP.itineraryPlace(net, rd.per[0], rd.cands, rd.top[0].c).length === 1, "drivers get a single direct leg");
   console.log("any-place scoring ok:", checked, "checks over", places.length, "places");
 }
+
+// ---- stations and places together ----
+{
+  const pois = JSON.parse(fs.readFileSync(path.join(__dirname, "../data/pois.json"), "utf8"));
+  const places = []; for (const p of pois.c) if (p[2]) places.push({ name: p[2], lat: p[0], lon: p[1], kind: "c" });
+  const ppl = [at("La Défense"), at("Gare de Lyon"), at("Massy - Palaiseau")];
+  for (const obj of ["max", "sum", "balanced"]) {
+    const st = MP.solve(net, ppl, { objective: obj, top: 1 }), pl = MP.solve(net, ppl, { objective: obj, top: 1, places, stations: false }), both = MP.solve(net, ppl, { objective: obj, top: 1, places, stations: true });
+    assert(Math.abs(both.top[0].score - Math.min(st.top[0].score, pl.top[0].score)) < 1e-9, obj + ": stations + places = the better of the two");
+    assert(both.cands.some(x => x.kind === "station") && both.cands.some(x => x.kind === "c"), "both kinds are candidates");
+  }
+  const both = MP.solve(net, ppl, { objective: "max", top: 3, places, stations: true });
+  assert(both.top.every(r => r.place && typeof r.place.name === "string"), "every row says what it is");
+  console.log("mixed candidate sets ok");
+}

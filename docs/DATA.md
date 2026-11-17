@@ -10,6 +10,7 @@ All files in `data/` are **generated and committed**, so a fresh clone works wit
 | `bus-lines.json` | 4 MB | bus line drawings; optional, loaded on demand | IDFM dataset `traces-des-lignes-regulieres-de-bus-en-ile-de-france` | `tools/build_basemap.py` |
 | `roads.json`, `roads-detail.json` | 1.2 MB, 2.7 MB | motorway to primary; secondary and tertiary | OpenStreetMap | `tools/build_osm.py` |
 | `water.json`, `green.json` | 0.8 MB, 2.5 MB | rivers, water polygons; parks and forests with names | OpenStreetMap | `tools/build_osm.py` |
+| `culture.json` | 0.2 MB | named museums, galleries, theatres, cinemas, libraries... and sights, as meeting places | OpenStreetMap | `tools/build_culture.py` |
 | `places.json`, `pois.json` | 10 KB, 0.8 MB | town names; ~24,000 restaurants, cafés and bars | OpenStreetMap | `tools/build_osm.py` |
 | `events/` | — | runtime event store, **not** in git | — | `api/meetup.php` |
 

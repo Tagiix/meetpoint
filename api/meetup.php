@@ -47,12 +47,18 @@ function clean_person($p) {
         'modes' => ['walk' => !empty($m['walk']), 'transit' => !empty($m['transit']), 'bike' => !empty($m['bike']), 'car' => !empty($m['car'])],
     ];
 }
+// What may be a meeting point: station, r (restaurant), c (café), b (bar), park, culture, sights. At least one; old events used where = stations | places.
+function clean_meet($o) {
+    $kinds = ['station', 'r', 'c', 'b', 'park', 'culture', 'sights'];
+    if (isset($o['meet']) && is_array($o['meet'])) { $m = array_values(array_intersect($kinds, $o['meet'])); return $m ?: ['station']; }
+    return ($o['where'] ?? '') === 'places' ? ['r', 'c', 'b', 'park'] : ['station'];
+}
 function clean_options($o) {
     $o = is_array($o) ? $o : [];
     return [
         'objective' => in_array($o['objective'] ?? '', ['max', 'sum', 'balanced'], true) ? $o['objective'] : 'max',
         'profile' => (int)($o['profile'] ?? 0) === 1 ? 1 : 0,
-        'where' => ($o['where'] ?? '') === 'places' ? 'places' : 'stations',     // meet at a station, or at any café, restaurant, bar or park
+        'meet' => clean_meet($o),
         'maxmin' => max(0, min(180, (int)($o['maxmin'] ?? 0))),
         'buses' => !empty($o['buses']),
     ];
