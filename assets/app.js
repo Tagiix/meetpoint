@@ -17,7 +17,7 @@
   const DEFAULT_MODES = { walk: true, transit: true, bike: false, car: false };
 
   /* ---------- state ---------- */
-  const S = { api: true, ev: null, admin: null, mine: {}, draftOpts: Object.assign({}, DEFAULT_OPTS), title: "", draft: blankDraft(), editing: null, picking: null };            // picking: which address field the next map click fills (see addrField)
+  const S = { voter: null, api: true, ev: null, admin: null, mine: {}, draftOpts: Object.assign({}, DEFAULT_OPTS), title: "", draft: blankDraft(), editing: null, picking: null };            // picking: which address field the next map click fills (see addrField)
   let graphBase = null, result = null, busWarm = false, selected = 0, token = 0, lastSig = "", pollTimer = null;
   let markers = [], draftMarkers = [], dirn = "out", curRoutes = null, targetMarker = null, solveTimer = null, optTimer = null, sugg = [], suggTimer = null;
 
@@ -76,7 +76,8 @@
     for (let i = 0; i < flats.length; i += 1500) { base.addLines(layer, flats.slice(i, i + 1500), style); await later(); }
   }
   async function loadBasemap() {
-    const [rail, roads, water, green, places, pois] = await Promise.all(["rail-lines", "roads", "water", "green", "places", "pois"].map(getJson));
+    const [rail, roads, water, green, places, pois, culture] = await Promise.all(["rail-lines", "roads", "water", "green", "places", "pois", "culture"].map(getJson));
+    if (culture) culturePlaces = ["culture", "sights"].flatMap((k) => (culture[k] || []).map((p) => ({ name: p[2], lat: p[0], lon: p[1], kind: k, sub: p[3] })));
     if (green) { base.addPolys("green", green.polys, {}); base.setParkNames(green.names || []); }
     if (pois) base.setPois(pois);
     if (water) { base.addPolys("water", water.areas || [], {}); base.addLines("water", water.rivers || [], {}); }
@@ -192,12 +193,13 @@
     document.title = S.ev.title + " · Meet Point";
     $("view").innerHTML = `
       <section id="v-head"></section>
+      <section id="v-phase"></section>
       <section id="v-people-sec"><h2>People <span id="count" class="muted"></span></h2><ul id="people"></ul></section>
       <section id="v-results" hidden><h2>Best meeting points</h2><div id="cards"></div><div id="places"></div></section>
       <section id="v-add"></section>
       <section id="v-opts"><h2>Settings</h2><div class="card" id="opts-body"></div></section>
       ${S.admin ? '<section><button id="del" class="btn danger sm" style="align-self:flex-start">Delete this event</button></section>' : ""}`;
-    renderHead(); renderPeople(); renderAdd(); renderOpts();
+    renderHead(); renderPeople(); renderAdd(); renderOpts(); renderPhase();
     idle = 0; nextPoll();
   }
   function renderHead() {
@@ -242,7 +244,7 @@
       return `<li class="card person" data-pid="${p.id}">
         <span class="dot" style="background:${COLORS[i]}"></span>
         <div class="nm"><span>${esc(p.name)}</span>${mine ? '<span class="you">you</span>' : ""}</div>
-        <div class="acts row">${can ? `<button class="btn sm" data-act="edit">${open ? "Done" : "Edit"}</button>` : ""}${S.admin && !mine && !open ? '<button class="btn ghost sm" data-act="remove" title="Remove this person">Remove</button>' : ""}</div>
+        <div class="acts row">${can && phase() === "open" ? `<button class="btn sm" data-act="edit">${open ? "Done" : "Edit"}</button>` : ""}${S.admin && !mine && !open && phase() === "open" ? '<button class="btn ghost sm" data-act="remove" title="Remove this person">Remove</button>' : ""}</div>
         <div class="ad">${esc(addrOf(p))}</div>
         ${hasRet(p) ? `<div class="ad back">↩ ${esc(addrOf(p.ret))}</div>` : ""}
         ${open ? editHTML(p) : `<div class="chips" style="grid-column:2/-1;margin-top:6px">${MODES.filter(([k]) => p.modes[k]).map(([, l]) => `<span class="chip static">${l}</span>`).join("")}</div>`}
@@ -251,7 +253,7 @@
     renderMarkers();
   }
   let addKey = "";
-  const addState = () => (S.ev.people.length >= 10) + ":" + Object.keys(S.mine).some((pid) => S.ev.people.some((p) => p.id === pid));
+  const addState = () => phase() + (S.ev.people.length >= 10) + ":" + Object.keys(S.mine).some((pid) => S.ev.people.some((p) => p.id === pid));
   function renderAddIfNeeded() {                        // the add form only depends on these two facts, so typing in it is never interrupted
     if (addState() !== addKey) renderAdd();
   }
@@ -259,6 +261,7 @@
   function renderAdd() {
     addKey = addState();
     const d = S.draft, hasMine = Object.keys(S.mine).some((pid) => S.ev.people.some((p) => p.id === pid));
+    if (phase() !== "open") { $("v-add").innerHTML = ""; return; }
     if (S.ev.people.length >= 10) { $("v-add").innerHTML = '<div class="msg">This event is full (10 people).</div>'; return; }
     $("v-add").innerHTML = `<h2>${hasMine ? "Add someone else" : "Add your position"}</h2>
       <div class="card stack">
@@ -271,7 +274,7 @@
       </div>`;
   }
   function renderOpts() {
-    $("opts-body").innerHTML = optionsHTML(S.ev.options, !!S.admin) + (S.admin ? "" : '<p class="small muted" style="margin-top:10px">Only the organizer can change these.</p>');
+    $("opts-body").innerHTML = optionsHTML(S.ev.options, !!S.admin && phase() === "open") + (S.admin ? "" : '<p class="small muted" style="margin-top:10px">Only the organizer can change these.</p>');
   }
 
   /* ---------- markers ---------- */
@@ -395,7 +398,7 @@
   async function refresh() {
     S.ev = await Api.get(S.ev.id);
     S.mine = Object.fromEntries(Object.entries(S.mine).filter(([pid]) => S.ev.people.some((p) => p.id === pid)));
-    renderPeople(); renderAdd(); renderOpts(); renderHead(); scheduleSolve();
+    renderPeople(); renderAdd(); renderOpts(); renderHead(); renderPhase(); if (phase() === "voting") renderCards(); scheduleSolve();
   }
   /* The server is asked for changes every 10 s, then every 20 s and 40 s while nothing happens; any click or edit goes back to 10 s.
      Hidden tabs do not poll at all and catch up the moment they are shown again. */
@@ -411,7 +414,7 @@
       S.ev = e; S.mine = Object.fromEntries(Object.entries(S.mine).filter(([pid]) => e.people.some((p) => p.id === pid)));
       if (!inside(".more")) renderPeople();            // keep the edit panel alone while someone types in it
       if (!inside("#opts-body")) renderOpts();
-      renderAddIfNeeded(); scheduleSolve();
+      renderAddIfNeeded(); renderPhase(); if (phase() === "voting") renderCards(); scheduleSolve();
     } catch (err) { if (/not found/.test(err.message)) { notice("This event was deleted.", "warn"); return showHome(); } }
     nextPoll();
   }
@@ -429,27 +432,114 @@
     const sig = JSON.stringify([ps.map((p) => [p.lat, p.lon, hasRet(p) ? p.ret : null, p.modes, p.weight]), o]);
     if (sig === lastSig && !force) return; lastSig = sig;
     const sec = $("v-results"); if (!sec) return; sec.hidden = false;
-    if (ps.length < 2) { clearResult(); $("cards").innerHTML = '<div class="empty">Add at least two people to see the best meeting point.</div>'; return; }
+    if (ps.length < 2) { clearResult(); renderPhase(); $("cards").innerHTML = '<div class="empty">Add at least two people to see the best meeting point.</div>'; return; }
     const people = ps.map((p) => Object.assign({}, p, { ret: hasRet(p) ? p.ret : null }));
     if (o.buses && !busWarm) notice("Loading the bus network…");
     let r;
-    try { r = await engine.solve({ profile: o.profile, buses: o.buses }, people, { objective: o.objective, maxMinutes: o.maxmin, top: 3, meet: meetOf(o) }); }
+    try { r = await engine.solve({ profile: o.profile, buses: o.buses }, people, { objective: o.objective, maxMinutes: o.maxmin, top: 5, meet: meetOf(o) }); }
     catch (e) { return notice("Could not compute the meeting point (" + e.message + ")." + (o.buses ? " Turn buses off or run tools/build_bus.py." : ""), "warn"); }
     if (o.buses && !busWarm) { busWarm = true; notice(""); }
     if (!r) return;                                      // a newer request replaced this one
     const keep = result && result.top[selected] ? result.top[selected].c : null;
     result = { top: r.top, relaxed: r.relaxed, people, seq: r.seq };
+    result.top.forEach((x) => (x.est = { times: x.times.slice(), back: x.back.slice(), max: x.max, sum: x.sum }));   // the solver's own numbers, kept for the ballot
     if (!result.top.length) { clearResult(); $("cards").innerHTML = '<div class="empty">No meeting point is reachable for everyone. Check that each person can reach the rail network with a mode they ticked.</div>'; return; }
     const same = result.top.findIndex((r) => r.c === keep);
     result.relaxedLimit = result.relaxed ? o.maxmin : 0;
-    renderCards(); select(same >= 0 ? same : 0);
+    renderCards(); renderPhase(); select(same >= 0 ? same : 0);
   }
   function clearResult() {
     result = null; token++; $("player").hidden = true; flow.setRoutes([], null); flow.pause();
     if (targetMarker) { targetMarker.remove(); targetMarker = null; }
     const p = $("places"); if (p) p.innerHTML = "";
   }
+  /* ---------- the vote ---------- */
+  const phase = () => (S.ev && S.ev.phase) || "open";                 // open: people register; voting: everybody picks one of the best 5
+  const votesOf = () => (S.ev && S.ev.votes) || {};
+  const votable = () => S.ev.people.filter((p) => S.admin || S.mine[p.id]);       // the entries this browser may vote for
+  const voter = () => { const v = votable(); return v.find((p) => p.id === S.voter) || v[0] || null; };
+  const posKey = (lat, lon) => lat.toFixed(4) + "," + lon.toFixed(4);
+
+  let culturePlaces = [];                                              // data/culture.json: museums, theatres, sights...
+  const metres = (a, b, c, d) => Math.hypot((c - a) * 111320, (d - b) * 73000);
+  /* what to do around a point: places to eat or drink, culture and sights, parks (all from the local data: instant) */
+  function around(lat, lon) {
+    const near = base.nearby(lat, lon, 350), label = { r: "Restaurant", c: "Café", b: "Bar" };
+    const food = [...near.filter((p) => p.t === "r").slice(0, 3), ...near.filter((p) => p.t === "c").slice(0, 2), ...near.filter((p) => p.t === "b").slice(0, 1)].map((p) => ({ name: p.name, what: label[p.t], d: p.d }));
+    const cult = culturePlaces.map((p) => ({ name: p.name, what: cap(p.sub || p.kind), d: metres(lat, lon, p.lat, p.lon) })).filter((p) => p.d <= 700).sort((x, y) => x.d - y.d);
+    const parks = (base.parkRaw || []).map((p) => ({ name: p[0], what: "Park", d: metres(lat, lon, p[1], p[2]) })).filter((p) => p.d <= 600).sort((x, y) => x.d - y.d);
+    return { eat: near.length, food, cult, parks };
+  }
+  function aroundHTML(lat, lon, open) {
+    const a = around(lat, lon), line = (p) => `<li><b>${esc(p.name)}</b> · ${esc(p.what)} · ${Math.round(p.d / 10) * 10} m</li>`;
+    const summary = `${a.eat} to eat or drink · ${a.cult.length} culture and sights · ${a.parks.length} parks nearby`;
+    if (!open) return `<div class="small muted">${summary}</div>`;
+    const items = [...a.food, ...a.cult.slice(0, 3), ...a.parks.slice(0, 2)];
+    return `<div class="around"><div class="small muted">${summary}</div>${items.length ? `<ul>${items.map(line).join("")}</ul>` : ""}</div>`;
+  }
+
+  /* the panel below the people: organizer controls, and the voting header */
+  function renderPhase() {
+    const ph = phase(), el = $("v-phase"); if (!el) return;
+    ["v-people-sec", "v-add", "v-opts"].forEach((id) => { const e = $(id); if (e) e.hidden = ph === "voting"; });   // while voting the panel is the vote
+    const inv = document.querySelector("#v-head .invite"); if (inv) inv.hidden = ph === "voting";
+    if (ph === "voting") {
+      const voted = Object.keys(votesOf()).length, n = S.ev.people.length, mine = votable(), v = voter();
+      el.innerHTML = `<h2>Vote for the meeting place</h2>
+        <div class="card stack">
+          <p class="small muted">Registration is closed. Pick the option you prefer: ${voted} of ${n} have voted.</p>
+          ${mine.length > 1 ? `<div class="field"><label>Voting as</label><select id="voter" class="select">${mine.map((p) => `<option value="${p.id}"${v && v.id === p.id ? " selected" : ""}>${esc(p.name)}</option>`).join("")}</select></div>` : ""}
+          ${!mine.length ? '<p class="small muted">You are not in this event, so you can only watch the vote.</p>' : ""}
+          ${S.admin ? '<button id="reopen" class="btn sm" style="align-self:flex-start" title="Back to registration. The votes are dropped.">← Reopen registration</button>' : ""}
+        </div>`;
+    } else if (S.admin) {
+      el.innerHTML = `<div class="card stack">
+        <b>Everybody is in?</b>
+        <p class="small muted">Registration closes and everyone votes for one of the best 5 places. You can reopen it later.</p>
+        <button id="close-reg" class="btn primary" ${S.ev.people.length >= 2 && result && result.top.length ? "" : "disabled"}>Everyone is registered: start the vote</button></div>`;
+    } else el.innerHTML = '<p class="small muted">The organizer starts the vote once everybody has joined.</p>';
+    const h = document.querySelector("#v-results h2"); if (h) h.textContent = ph === "voting" ? "The top 5 places" : "Best meeting points";
+  }
+  async function closeRegistration() {
+    if (!result || !result.top.length) return notice("No meeting point yet.", "warn");
+    if (!confirm("Close registration and start the vote? Nobody can join or change their position until you reopen it.")) return;
+    const ballot = result.top.slice(0, 5).map((r) => { const t = targetOf(r), e = r.est || r; return { name: t.name, lat: t.lat, lon: t.lon, kind: r.place ? r.place.kind : "station", sub: (r.place && r.place.sub) || "", times: e.times, back: e.back, max: e.max, sum: e.sum }; });
+    try { await Api.post({ action: "close", id: S.ev.id, adminKey: S.admin, ballot }); S.editing = null; await refresh(); }
+    catch (e) { notice("Could not start the vote: " + e.message, "warn"); }
+  }
+  async function reopenRegistration() {
+    if (!confirm("Go back to registration? The votes are dropped.")) return;
+    try { await Api.post({ action: "reopen", id: S.ev.id, adminKey: S.admin }); await refresh(); } catch (e) { notice("Could not reopen: " + e.message, "warn"); }
+  }
+  async function castVote(b) {
+    const p = voter(); if (!p) return;
+    const cur = votesOf()[p.id];
+    try { await Api.post({ action: "vote", id: S.ev.id, pid: p.id, token: S.mine[p.id], adminKey: S.admin, choice: cur === b ? null : b }); await refresh(); }
+    catch (e) { notice("Could not vote: " + e.message, "warn"); }
+  }
+  /* the ballot is the list everybody was given; numbers come from this browser's own result when it is the same place (street-refined), else from the snapshot */
+  function renderBallot() {
+    const B = S.ev.ballot || [], votes = votesOf(), me = voter(), mine = me ? votes[me.id] : undefined;
+    const counts = B.map((_, i) => Object.values(votes).filter((c) => c === i).length), lead = Math.max(0, ...counts);
+    $("cards").innerHTML = B.map((b, i) => {
+      const li = result ? result.top.findIndex((r) => { const t = targetOf(r); return posKey(t.lat, t.lon) === posKey(b.lat, b.lon); }) : -1, r = li >= 0 ? result.top[li] : b;
+      const near = nearestStation(b.lat, b.lon), what = b.kind === "station" ? "" : (b.sub ? cap(b.sub) : KIND[b.kind] || "Place");
+      const sub = b.kind === "station" ? "" : `${what}${near ? " · near " + near[1] : ""}`, sel = li >= 0 && li === selected;
+      const voters = S.ev.people.map((p, pi) => (votes[p.id] === i ? `<span class="vdot" style="background:${COLORS[pi]}" title="${esc(p.name)}"></span>` : "")).join("");
+      return `<div class="card res ${sel ? "on" : ""} ${mine === i ? "voted" : ""}" data-k="${li}" data-b="${i}" role="button" tabindex="0">
+        <div class="t"><b>${esc(b.name)}</b><span class="rank">#${i + 1}</span></div>${sub ? `<div class="small muted" style="margin:-4px 0 6px">${esc(sub)}</div>` : ""}
+        <div class="times">${S.ev.people.map((p, pi) => `
+          <span style="color:${COLORS[pi]}">●</span><span class="bar" title="${esc(p.name)}"><i style="width:${Math.min(100, Math.max(r.times[pi] || 0, r.back[pi] || 0) / (r.max || 1) * 100)}%;background:${COLORS[pi]}"></i></span><span>${Math.round(r.times[pi])} min${S.ev.people[pi].ret && r.back && r.back[pi] ? ` · ↩ ${Math.round(r.back[pi])}` : ""}</span>`).join("")}</div>
+        <div class="meta">Longest ${Math.round(r.max)} min · average ${Math.round(r.sum / ((r.times.length + r.back.length) || 1))} min</div>
+        ${aroundHTML(b.lat, b.lon, sel)}
+        <div class="votes ${counts[i] && counts[i] === lead ? "lead" : ""}"><span class="vcount">${counts[i]} vote${counts[i] === 1 ? "" : "s"}${counts[i] && counts[i] === lead ? " · leading" : ""}</span><span class="vdots">${voters}</span>
+          ${me ? `<button class="btn sm ${mine === i ? "primary" : ""}" data-vote="${i}">${mine === i ? "✓ Your vote" : "Vote"}</button>` : ""}</div>
+      </div>`;
+    }).join("");
+  }
   function renderCards() {
+    if (phase() === "voting" && S.ev.ballot) return renderBallot();
+    if (!result) return;
     const relaxedLimit = result.relaxedLimit;
     $("cards").innerHTML = (relaxedLimit ? `<div class="msg warn">Nobody could stay under ${relaxedLimit} min. Showing the closest options.</div>` : "") +
       result.top.map((r, k) => `
@@ -462,7 +552,7 @@
   }
 
   /* ---------- selection, routes, animation ---------- */
-  async function select(k) {
+  async function select(k, zoomIn) {
     selected = k; const my = ++token, r = result.top[k], tg = targetOf(r), people = result.people;
     document.querySelectorAll("#cards .res").forEach((el) => el.classList.toggle("on", +el.dataset.k === k));
     let iti; try { iti = await engine.itineraries(result.seq, r.c); } catch (e) { return; }   // the engine rebuilds the legs
@@ -477,9 +567,9 @@
     const target = [tg.lat, tg.lon];
     if (targetMarker) targetMarker.remove();
     targetMarker = L.marker(target, { icon: L.divIcon({ className: "", html: '<div class="target">★</div>', iconSize: [34, 34], iconAnchor: [17, 17] }), zIndexOffset: 1000 }).addTo(map).bindTooltip(tg.name, { direction: "top", offset: [0, -18] });
-    fitView();
+    if (phase() === "voting" && zoomIn) map.flyTo(target, 15, { duration: 0.6 }); else fitView();      // voting: a click zooms to the place; the routes still lead there
     $("player").hidden = false; flow.setRoutes(curRoutes[dirn], target);   // shown paused: the animation starts on Play, not by itself
-    loadPlaces([0, tg.name, tg.lat, tg.lon]);
+    if (phase() === "voting") { const bx = $("places"); if (bx) bx.innerHTML = ""; } else loadPlaces([0, tg.name, tg.lat, tg.lon]);
     await new Promise((r) => setTimeout(r, 500)); if (my !== token) return;      // skip the lookups while someone is clicking through the cards
     await refine(out.concat(back || []), my);          // real street geometry for walk/bike/car legs
     if (my !== token) return;
@@ -546,7 +636,14 @@
     if (t.id === "d-add") return addPerson();
     if (t.dataset.dm) { S.draft.modes[t.dataset.dm] = !S.draft.modes[t.dataset.dm]; return renderAdd(); }
     if (t.closest(".suggest") && t.dataset.i !== undefined) { const box = t.closest(".suggest"); return pickSuggestion(box, box._items[+t.dataset.i]); }
-    if (t.classList.contains("res")) return select(+t.dataset.k);
+    if (t.dataset.vote !== undefined) return castVote(+t.dataset.vote);
+    if (t.id === "close-reg") return closeRegistration();
+    if (t.id === "reopen") return reopenRegistration();
+    if (t.classList.contains("res")) {
+      if (t.dataset.b !== undefined && +t.dataset.k < 0) { const b = S.ev.ballot[+t.dataset.b]; return map.flyTo([b.lat, b.lon], 15, { duration: 0.6 }); }   // not in this browser's result: just go there
+      if (t.dataset.b !== undefined && +t.dataset.k === selected && result) { const tg = targetPoint(); return map.flyTo(tg, map.getZoom() >= 14.5 ? 12.5 : 15, { duration: 0.6 }); }   // a second click zooms back out
+      return select(+t.dataset.k, true);
+    }
     const li = t.closest(".person"); const p = li && S.ev.people.find((x) => x.id === li.dataset.pid);
     if (p && t.dataset.act === "edit") { S.editing = S.editing === p.id ? null : p.id; return renderPeople(); }
     if (p && (t.dataset.act === "remove" || t.dataset.act === "leave")) return removePerson(p);
@@ -590,6 +687,7 @@
   });
   view.addEventListener("change", (e) => {
     const t = e.target;
+    if (t.id === "voter") { S.voter = t.value; return renderBallot(); }
     if (t.dataset.retsw !== undefined) {                 // way back to a different address, for an existing person
       const p = S.ev.people.find((x) => x.id === t.closest(".person").dataset.pid); if (!p) return;
       p.ret = t.checked ? { addr: p.addr, lat: p.lat, lon: p.lon } : null; renderPeople(); savePerson(p);

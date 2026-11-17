@@ -66,6 +66,16 @@ minimize the longest trip, restaurants nearby), a nice flow animation, and the *
   turning the answer into an actual place to sit down. On a 10-person sample the best station was 31 min, the best place 33 min (rail only).
 - Tests: brute force over all stops (no grid) for the 3 objectives, legs add up including the final walk, spacing, drivers get one direct leg. Solve time with all places and 10 people: ~50 ms (rail), 590 ms with buses (in the worker).
 
+## Round 6: the vote (branch `feature/voting`)
+- Phases of an event: `open` (people register) <-> `voting`. The organizer's button "Everyone is registered: start the vote" snapshots the top 5 (names, positions, per-person times, longest, sum) into the event as the ballot,
+  locks registration (join, edit, leave, settings are refused by the server) and starts the vote. "Reopen registration" goes back and drops the ballot and votes.
+- The vote is deliberately only visual (user's call): each registered person picks one option (or takes it back), the cards show the count, a dot per voter in their colour and "leading". No winner announcement step.
+  The organizer may vote for anyone; a person votes with their own token. Votes are public to the people of the event.
+- While voting, the left panel is the vote: the top 5 with stats, what is around each (restaurants, cafés, bars within 350 m, culture and sights within 700 m, parks within 600 m, from local data),
+  a click selects it and zooms the map there (a second click zooms back out), the organizer keeps the "Reopen registration" control; people, add form, settings and invite are hidden.
+- Results are now the top 5 everywhere (they were 3).
+- API: `close`, `vote`, `reopen` (see api/meetup.php); smoke test covers phases, permissions and locks; e2e runs organizer + guest through the whole vote.
+
 ## Not done / ideas
 - Live traffic and real-time departures: **decided against** (2026-11-17). It needs the transport authority's API key (so a server-side proxy), rate-limit handling and per-person queries that cannot be precomputed, which breaks the "basic server, everything in the browser" design; the timetable model is already within a few minutes.
 - Activity filter (parks, culture, cinemas) beyond food and drink; French interface.

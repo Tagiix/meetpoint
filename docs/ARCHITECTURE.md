@@ -62,6 +62,9 @@ Each person: `{id, name, addr, lat, lon, weight, modes, hash}`. Reads and writes
 | `POST {action:"join", id, p}` | knowing the id | adds a position, returns `{pid, token}` |
 | `POST {action:"update", id, pid, token \| adminKey, p}` | entry token or organizer | edit an entry (`p.ret` = way-back address or null) |
 | `POST {action:"leave", id, pid, token \| adminKey}` | entry token or organizer | remove an entry |
+| `POST {action:"close", id, adminKey, ballot}` | organizer | registration is over, the vote starts (ballot = up to 5 options) |
+| `POST {action:"vote", id, pid, token \| adminKey, choice}` | entry token or organizer | vote for a ballot index, or `null` to take it back |
+| `POST {action:"reopen", id, adminKey}` | organizer | back to registration; drops ballot and votes |
 | `POST {action:"options", id, adminKey, title?, options}` | organizer | settings and title (`options.meet`: list of kinds) |
 | `POST {action:"delete", id, adminKey}` | organizer | delete the event |
 

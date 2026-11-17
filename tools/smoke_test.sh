@@ -43,6 +43,22 @@ r=$(post "{\"action\":\"options\",\"id\":\"$id\",\"adminKey\":\"wrong\",\"option
 case "$r" in *error*) ok "non-organizer cannot change settings";; *) bad "settings changed without organizer key: $r";; esac
 r=$(post "{\"action\":\"join\",\"id\":\"$id\",\"p\":{\"name\":\"Far\",\"lat\":43,\"lon\":5}}")
 case "$r" in *error*) ok "position outside Île-de-France refused";; *) bad "far position accepted: $r";; esac
+echo "[voting]"
+pidB=$(printf '%s' "$g" | grep -o '"id":"[a-f0-9]\{6\}"' | sed -n 2p | field id)
+BAL='[{"name":"Option one","lat":48.86,"lon":2.35,"kind":"station","times":[10,12],"back":[10,12],"max":12,"sum":44},{"name":"Option two","lat":48.87,"lon":2.36,"kind":"c","sub":"cafe","times":[15,9],"back":[15,9],"max":15,"sum":48}]'
+r=$(post "{\"action\":\"close\",\"id\":\"$id\",\"adminKey\":\"wrong\",\"ballot\":$BAL}"); case "$r" in *error*) ok "only the organizer can close registration";; *) bad "registration closed without the organizer key: $r";; esac
+r=$(post "{\"action\":\"vote\",\"id\":\"$id\",\"pid\":\"$pid\",\"token\":\"$tok\",\"choice\":0}"); case "$r" in *error*) ok "no voting before the vote starts";; *) bad "vote accepted during registration: $r";; esac
+r=$(post "{\"action\":\"close\",\"id\":\"$id\",\"adminKey\":\"$ak\",\"ballot\":$BAL}"); case "$r" in *'"ok":true'*) ok "organizer closes registration";; *) bad "close failed: $r";; esac
+r=$(post "{\"action\":\"join\",\"id\":\"$id\",\"p\":{\"name\":\"Late\",\"lat\":48.85,\"lon\":2.35,\"modes\":{\"transit\":true}}}"); case "$r" in *error*) ok "nobody can join once registration is closed";; *) bad "join accepted after closing: $r";; esac
+r=$(post "{\"action\":\"update\",\"id\":\"$id\",\"pid\":\"$pid\",\"token\":\"$tok\",\"p\":{\"name\":\"A\",\"lat\":48.8,\"lon\":2.3}}"); case "$r" in *error*) ok "entries are locked during the vote";; *) bad "entry edited during the vote: $r";; esac
+r=$(post "{\"action\":\"vote\",\"id\":\"$id\",\"pid\":\"$pid\",\"token\":\"wrong\",\"choice\":0}"); case "$r" in *error*) ok "a vote needs the person's own token";; *) bad "vote with a wrong token: $r";; esac
+r=$(post "{\"action\":\"vote\",\"id\":\"$id\",\"pid\":\"$pid\",\"token\":\"$tok\",\"choice\":7}"); case "$r" in *error*) ok "a choice outside the ballot is refused";; *) bad "bad choice accepted: $r";; esac
+r=$(post "{\"action\":\"vote\",\"id\":\"$id\",\"pid\":\"$pid\",\"token\":\"$tok\",\"choice\":1}"); case "$r" in *'"ok":true'*) ok "a person votes";; *) bad "vote failed: $r";; esac
+post "{\"action\":\"vote\",\"id\":\"$id\",\"pid\":\"$pidB\",\"adminKey\":\"$ak\",\"choice\":0}" >/dev/null
+g=$(curl -s --max-time 20 "$BASE/api/meetup.php?id=$id"); case "$g" in *'"votes":{"'$pid'":1,"'$pidB'":0}'*|*'"votes":{"'$pidB'":0,"'$pid'":1}'*) ok "both votes are recorded (the organizer may vote for anyone)";; *) bad "votes not recorded: $g";; esac
+post "{\"action\":\"reopen\",\"id\":\"$id\",\"adminKey\":\"$ak\"}" >/dev/null
+g=$(curl -s --max-time 20 "$BASE/api/meetup.php?id=$id"); case "$g" in *'"ballot"'*|*'"votes"'*) bad "ballot or votes survived reopening: $g";; *) ok "reopening drops the ballot and the votes";; esac
+r=$(post "{\"action\":\"join\",\"id\":\"$id\",\"p\":{\"name\":\"C\",\"lat\":48.85,\"lon\":2.35,\"modes\":{\"transit\":true}}}"); case "$r" in *'"pid"'*) ok "people can join again after reopening";; *) bad "join refused after reopening: $r";; esac
 echo "[security]"
 body=$(curl -s --max-time 20 "$BASE/data/events/$id.php")
 case "$body" in *people*|*adminHash*|*'"lat"'*) bad "event file is readable over the web: $BASE/data/events/$id.php (see docs/DEPLOY.md)";; *) ok "event file is not readable over the web";; esac

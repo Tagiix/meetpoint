@@ -46,13 +46,39 @@ check('guest added a position', (await event()).people.length === 2);
 await A.waitForFunction(() => document.querySelector('#count')?.textContent.startsWith('2/'), null, { timeout: 25000 });
 check('organizer sees the guest by polling', true);
 await A.waitForSelector('.res');
-check('three ranked results', (await A.locator('.res').count()) === 3);
+check('five ranked results', (await A.locator('.res').count()) === 5);
 check('solving runs in a Web Worker', (await A.evaluate(() => window.__meetpointEngine.mode)) === 'worker');
 check('animation does not start by itself', (await A.locator('#play').textContent()).trim() === '▶');
 await A.click('#play'); await A.waitForTimeout(400);
 check('Play starts it', (await A.locator('#play').textContent()).trim() === '❚❚');
 await A.click('#play');
 await A.screenshot({ path: 'shots/organizer.png' });
+
+// the vote: the organizer closes registration, the left panel becomes the top 5, each person votes, the organizer can go back
+check('guest is told the organizer starts the vote', /organizer starts the vote/.test(await G.locator('#v-phase').textContent()));
+A.on('dialog', (d) => d.accept()); G.on('dialog', (d) => d.accept());
+await A.click('#close-reg'); await A.waitForSelector('#voter, [data-vote]', { timeout: 15000 });
+check('event is in the voting phase', (await event()).phase === 'voting' && (await event()).ballot.length === 5);
+check('the panel is the vote: people, add form and settings are hidden', !(await A.locator('#v-people-sec').isVisible()) && !(await A.locator('#v-opts').isVisible()));
+await G.waitForSelector('[data-vote]', { timeout: 25000 });
+check('guest sees the top 5 with vote buttons', (await G.locator('.res [data-vote]').count()) === 5);
+check('each option says what is around', (await G.locator('.res .small.muted', { hasText: 'to eat or drink' }).count()) >= 5);
+await G.locator('.res').nth(1).click(); await G.waitForTimeout(800);
+check('the selected option shows what to do around', (await G.locator('.res.on .around li').count()) > 0);
+const zoom0 = await G.evaluate(() => window.__meetpointMap.getZoom()); await G.waitForTimeout(800);
+check('clicking an option zooms to it', zoom0 >= 14.5, String(zoom0));
+await G.locator('.res [data-vote]').nth(1).click(); await G.waitForTimeout(1500);
+let ev = await event(); check('the guest vote is recorded', Object.values(ev.votes).includes(1));
+await A.locator('.res [data-vote]').nth(1).click(); await A.waitForTimeout(1500);
+ev = await event(); check('two votes for option 2', Object.values(ev.votes).filter((v) => v === 1).length === 2);
+await A.waitForFunction(() => /2 votes · leading/.test(document.querySelector('#cards').textContent));
+check('the tally is shown on the card', true);
+await A.screenshot({ path: 'shots/vote.png' });
+await G.locator('.res [data-vote]').nth(1).click(); await G.waitForTimeout(1200);
+check('a vote can be taken back', Object.values((await event()).votes).filter((v) => v === 1).length === 1);
+await A.click('#reopen'); await A.waitForSelector('#v-people-sec:not([hidden])', { timeout: 15000 });
+check('the organizer can go back to registration', (await event()).phase === 'open' && !(await event()).ballot);
+await G.waitForSelector('#v-add .btn', { timeout: 25000 }).catch(() => {});
 
 // the address dropdown: case, accents and apostrophes are ignored; Tab and arrows walk the list, Enter picks
 {

@@ -214,7 +214,7 @@
         if (top.some(q => hav([x.lat, x.lon], [cands[q.c].lat, cands[q.c].lon]) < 500)) continue;
         if (x.kind === "station") seen.add(r.hub);
         r.place = { name: x.name, lat: x.lat, lon: x.lon, kind: x.kind, sub: x.sub };
-      } else { if (seen.has(r.hub)) continue; seen.add(r.hub); }
+      } else { if (seen.has(r.hub)) continue; seen.add(r.hub); r.place = { name: st[r.c][1], lat: st[r.c][2], lon: st[r.c][3], kind: "station" }; }
       top.push(r); if (top.length >= opts.top) break;
     }
     return { top, relaxed, per, back, rows, cands };

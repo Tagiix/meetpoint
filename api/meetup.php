@@ -11,12 +11,16 @@
 //   POST {action:"update", id, pid, token, p}  (adminKey instead of token also works: the organizer edits anyone)
 //   POST {action:"leave",  id, pid, token}     (same)
 //   p = {name, addr, lat, lon, modes, weight, ret: {addr, lat, lon} | null}   ret = where they go back to
+//   POST {action:"close",  id, adminKey, ballot}      organizer: registration is over, the vote starts (ballot = up to 5 options)
+//   POST {action:"vote",   id, pid, token|adminKey, choice}   choice = index in the ballot, or null to take the vote back
+//   POST {action:"reopen", id, adminKey}              organizer: back to registration (the ballot and the votes are dropped)
+//   Phases: open (default; people can join, edit, leave; settings can change) <-> voting (a visual vote: each person picks one option).
 //   POST {action:"options", id, adminKey, title?, options}
 //   POST {action:"delete", id, adminKey}
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 
-const MAX_PEOPLE = 10, MAX_EVENTS = 500, KEEP_DAYS = 90;
+const MAX_PEOPLE = 10, MAX_EVENTS = 500, KEEP_DAYS = 90, MAX_BALLOT = 5;
 const GUARD = "<?php http_response_code(404); exit; ?>\n";
 $dir = __DIR__ . '/../data/events';
 if (!is_dir($dir)) { mkdir($dir, 0755, true); }
@@ -62,6 +66,22 @@ function clean_options($o) {
         'maxmin' => max(0, min(180, (int)($o['maxmin'] ?? 0))),
         'buses' => !empty($o['buses']),
     ];
+}
+function phase_of($e) { return $e['phase'] ?? 'open'; }
+function need_open($e) { if (phase_of($e) !== 'open') { fail(409, 'registration is closed'); } }
+// A ballot is a snapshot of the best options at the moment registration closes, so everybody votes on the same list.
+function clean_ballot($b) {
+    if (!is_array($b) || !count($b) || count($b) > MAX_BALLOT) { fail(400, 'bad ballot'); }
+    $kinds = ['station', 'r', 'c', 'b', 'park', 'culture', 'sights'];
+    $nums = function ($a) { return array_map(function ($v) { return round((float)$v, 1); }, array_slice(is_array($a) ? array_values($a) : [], 0, MAX_PEOPLE)); };
+    $out = [];
+    foreach ($b as $x) {
+        $pos = clean_pos($x);
+        $out[] = ['name' => trim(mb_substr((string)($x['name'] ?? ''), 0, 60)) ?: 'Place', 'lat' => $pos['lat'], 'lon' => $pos['lon'],
+                  'kind' => in_array($x['kind'] ?? '', $kinds, true) ? $x['kind'] : 'station', 'sub' => mb_substr((string)($x['sub'] ?? ''), 0, 30),
+                  'times' => $nums($x['times'] ?? []), 'back' => $nums($x['back'] ?? []), 'max' => round((float)($x['max'] ?? 0), 1), 'sum' => round((float)($x['sum'] ?? 0), 1)];
+    }
+    return $out;
 }
 function public_view($e) {
     $e['people'] = array_map(function ($p) { unset($p['hash']); return $p; }, $e['people']);
@@ -118,6 +138,7 @@ $is_admin = fn($e) => isset($in['adminKey']) && hash_equals($e['adminHash'], h($
 switch ($action) {
     case 'join':
         with_event($id, function (&$e) use ($in) {
+            need_open($e);
             if (count($e['people']) >= MAX_PEOPLE) { fail(409, 'this event is full'); }
             $p = clean_person($in['p'] ?? null);
             $pid = substr(bin2hex(random_bytes(4)), 0, 6); $tok = secret();
@@ -131,6 +152,7 @@ switch ($action) {
                 if ($q['id'] !== ($in['pid'] ?? '')) { continue; }
                 $ok = (isset($in['token']) && hash_equals($q['hash'], h($in['token']))) || $is_admin($e);   // the organizer may edit or remove anyone
                 if (!$ok) { fail(403, 'not your entry'); }
+                need_open($e);
                 if ($action === 'leave') { array_splice($e['people'], $i, 1); return ['ok' => true]; }
                 $p = clean_person($in['p'] ?? null); $p['id'] = $q['id']; $p['hash'] = $q['hash'];
                 $e['people'][$i] = $p; return ['ok' => true];
@@ -140,8 +162,40 @@ switch ($action) {
     case 'options':
         with_event($id, function (&$e) use ($in, $is_admin) {
             if (!$is_admin($e)) { fail(403, 'organizer only'); }
+            need_open($e);
             if (isset($in['title'])) { $e['title'] = trim(mb_substr((string)$in['title'], 0, 80)) ?: $e['title']; }
             $e['options'] = clean_options($in['options'] ?? []);
+            return ['ok' => true];
+        });
+    case 'close':
+        with_event($id, function (&$e) use ($in, $is_admin) {
+            if (!$is_admin($e)) { fail(403, 'organizer only'); }
+            need_open($e);
+            if (count($e['people']) < 2) { fail(409, 'at least two people are needed'); }
+            $e['ballot'] = clean_ballot($in['ballot'] ?? null);
+            $e['ballotPeople'] = array_column($e['people'], 'id');          // the order the times in the ballot follow
+            $e['votes'] = []; $e['phase'] = 'voting';
+            return ['ok' => true];
+        });
+    case 'vote':
+        with_event($id, function (&$e) use ($in, $is_admin) {
+            if (phase_of($e) !== 'voting') { fail(409, 'voting is not open'); }
+            foreach ($e['people'] as $q) {
+                if ($q['id'] !== ($in['pid'] ?? '')) { continue; }
+                $ok = (isset($in['token']) && hash_equals($q['hash'], h($in['token']))) || $is_admin($e);
+                if (!$ok) { fail(403, 'not your entry'); }
+                $c = $in['choice'] ?? null;
+                if ($c === null) { unset($e['votes'][$q['id']]); return ['ok' => true]; }
+                $c = (int)$c;
+                if ($c < 0 || $c >= count($e['ballot'])) { fail(400, 'bad choice'); }
+                $e['votes'][$q['id']] = $c; return ['ok' => true];
+            }
+            fail(404, 'person not found');
+        });
+    case 'reopen':
+        with_event($id, function (&$e) use ($is_admin) {
+            if (!$is_admin($e)) { fail(403, 'organizer only'); }
+            unset($e['ballot'], $e['ballotPeople'], $e['votes']); $e['phase'] = 'open';
             return ['ok' => true];
         });
     case 'delete':
