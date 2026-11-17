@@ -11,7 +11,7 @@ minimize the longest trip, restaurants nearby), a nice flow animation, and the *
 - **Routing runs in the browser.** A basic PHP host cannot run a routing engine (OpenTripPlanner needs Java and GBs of RAM; a PHP Dijkstra per request would be slow).
   Instead, offline scripts compress the IDFM GTFS timetables into a 140 KB graph; JavaScript runs one Dijkstra per person (about 10 ms for 10 people).
 - **Rail by default, buses optional.** Buses (1,967 lines, 15,000 stop areas) add 3.5 MB and ~250 ms per solve, so they load only when ticked.
-- **Candidates are stations.** Reachable and meaningful; a grid of arbitrary points would need street-level routing.
+- **Candidates are stations by default** (reachable and meaningful; a grid of arbitrary points would need street-level routing). Since round 5 the organizer can also allow named places (restaurants, cafés, bars, parks, culture, sights), always reached through a stop plus a walk or directly by foot, bike or car.
 - **Average waits, not live times.** Boarding costs half the typical headway for a weekday or Saturday off-peak window. Honest about it in the UI.
 - **Walk, bike and car legs are estimated, then refined** with OSRM street routes for the selected result only (≤ 20 calls), which also gives the geometry for the animation.
 - **Walking is an explicit mode, on by default** (owner's request). Transit users still walk to stations.
@@ -90,7 +90,7 @@ minimize the longest trip, restaurants nearby), a nice flow animation, and the *
 
 ## Not done / ideas
 - Live traffic and real-time departures: **decided against** (2026-11-17). It needs the transport authority's API key (so a server-side proxy), rate-limit handling and per-person queries that cannot be precomputed, which breaks the "basic server, everything in the browser" design; the timetable model is already within a few minutes.
-- Activity filter (parks, culture, cinemas) beyond food and drink; French interface.
+- More activity types or another language (the dictionary in `assets/i18n.js` makes a language a translation job, see round 7).
 - Rate limiting; event expiry is only 90 days after last write.
 - A licence file for the repository.
 - Create in Zen/Firefox: confirmed working by the owner (2026-11-17). Not yet run in automated Firefox tests (headless Firefox will not launch in the dev sandbox: "Could not find profile folder").
