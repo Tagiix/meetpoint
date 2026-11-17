@@ -24,8 +24,9 @@
   function blankDraft() { return { name: "", addr: "", lat: null, lon: null, modes: Object.assign({}, DEFAULT_MODES), retOn: false, ret: { addr: "", lat: null, lon: null } }; }
 
   /* ---------- local storage (per-browser secrets: organizer key and own entries) ---------- */
-  function store() { try { return JSON.parse(localStorage.getItem("meetpoint:v2")) || { events: {} }; } catch (e) { return { events: {} }; } }
+  function store() { try { const v = JSON.parse(localStorage.getItem("meetpoint:v2")); return v && typeof v === "object" && v.events && typeof v.events === "object" ? v : { events: {} }; } catch (e) { return { events: {} }; } }
   function putStore(s) { try { localStorage.setItem("meetpoint:v2", JSON.stringify(s)); } catch (e) {} }
+  function storageOk() { try { localStorage.setItem("meetpoint:t", "1"); const ok = localStorage.getItem("meetpoint:t") === "1"; localStorage.removeItem("meetpoint:t"); return ok; } catch (e) { return false; } }
   function getLocal(id) { return store().events[id] || { title: "", admin: null, mine: {} }; }
   function setLocal(id, patch) { const s = store(); s.events[id] = Object.assign(getLocal(id), patch); putStore(s); }
 
@@ -738,8 +739,10 @@
     const q = new URLSearchParams(location.search), id = q.get("e");
     if (id && q.get("k")) { setLocal(id, { admin: q.get("k") }); history.replaceState(null, "", "?e=" + id); }
     if (q.get("import")) {                                // ?import=id.key,id.key: remember several events as organizer (see tools/seed_events.py)
-      for (const part of q.get("import").split(",")) { const [eid, k] = part.split("."); if (/^[a-z0-9]{8}$/.test(eid) && k) setLocal(eid, { admin: k }); }
+      let n = 0;
+      for (const part of q.get("import").split(",")) { const [eid, k] = part.split("."); if (/^[a-z0-9]{8}$/.test(eid) && k) { setLocal(eid, { admin: k, title: getLocal(eid).title || "Event " + eid }); n++; } }   // placeholder title: listed at once, the real one follows
       history.replaceState(null, "", location.pathname);
+      setTimeout(() => { const left = Object.keys(store().events).length; notice(storageOk() ? `Remembered ${n} event${n === 1 ? "" : "s"} in this browser (${left} in the list).` : "This browser blocks site storage, so it cannot remember events. Allow cookies and site data for this address.", storageOk() ? "ok" : "warn"); }, 0);
     }
     return id ? openEvent(id) : showHome();
   }
@@ -789,6 +792,7 @@
       graphBase = await fetch(dataUrl("graph")).then((r) => r.json()); base.setStations(graphBase);
     } catch (e) { notice("Could not load data/graph.json. Run tools/build_graph.py first.", "warn"); }
     await route();
+    if (!storageOk()) notice("This browser blocks site storage, so it cannot remember your events or your organizer key. Allow cookies and site data for this address.", "warn");
     if (!S.api) notice(`Can't reach the event server (${ping.why}). Serve this folder with PHP (see README). If it is running, a content blocker may be blocking api/meetup.php.`, "warn");
   })();
 })();

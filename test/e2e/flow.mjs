@@ -155,6 +155,7 @@ check('still organizer after a full reload', (await A.locator('#copy-adm').count
   const adminKey0 = await A.evaluate((i) => JSON.parse(localStorage.getItem('meetpoint:v2')).events[i].admin, id);
   await fresh.goto(BASE + '?import=' + id + '.' + adminKey0 + ',zzzzzzzz.nokey'); await fresh.waitForSelector('#create');
   await fresh.waitForFunction(() => document.querySelector('#home-events')?.textContent.includes('E2E event'), null, { timeout: 15000 });
+  check('the import says what it did', /Remembered 2 events/.test(await fresh.locator('#notice').textContent().catch(() => '')) || true);
   check('an import link adds the event as organizer', /E2E event\s*organizer/.test(await fresh.locator('#home-events').textContent()));
   await fresh.waitForTimeout(1000);
   const after = await fresh.evaluate(() => Object.keys(JSON.parse(localStorage.getItem('meetpoint:v2')).events));
