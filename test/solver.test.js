@@ -108,3 +108,44 @@ console.log("scoring and way-back ok");
   }
   console.log("brute-force minimality ok:", checked, "checks");
 }
+
+// ---- meeting at places other than stations ----
+{
+  const pois = JSON.parse(fs.readFileSync(path.join(__dirname, "../data/pois.json"), "utf8"));
+  let seed = 17; const rnd = () => (seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296;
+  const places = [];
+  for (const kind of ["r", "c", "b"]) for (const p of pois[kind]) if (p[2] && rnd() < 0.08) places.push({ name: p[2], lat: p[0], lon: p[1], kind });
+  const pt = () => { const s = g.stations[Math.floor(rnd() * net.R)]; return [s[2] + (rnd() - .5) * .01, s[3] + (rnd() - .5) * .012]; };
+  const MODES = [{ walk: true, transit: true }, { transit: true }, { walk: true, transit: true, bike: true }, { car: true }, { walk: true }, { bike: true, transit: true }];
+  let checked = 0;
+  for (let it = 0; it < 25; it++) {
+    const k = 2 + Math.floor(rnd() * 3), ppl = [];
+    for (let i = 0; i < k; i++) { const [la, lo] = pt(), r = pt(); ppl.push({ lat: la, lon: lo, weight: 1 + Math.floor(rnd() * 3), modes: Object.assign({ walk: false, transit: false, bike: false, car: false }, MODES[Math.floor(rnd() * MODES.length)]), ret: rnd() < .3 ? { lat: r[0], lon: r[1] } : null }); }
+    for (const obj of ["max", "sum", "balanced"]) {
+      const res = MP.solve(net, ppl, { objective: obj, top: 3, places }), score = { sum: MP.AGG.sum, max: (t) => Math.max(...t), balanced: MP.AGG.balanced }[obj];
+      // independent time of one person to one place: direct trip, or arrive at ANY stop within the walking limit (all stops looped, no grid) and walk
+      const time = (r, x) => {
+        let best = Infinity;
+        for (const m of r.direct) best = Math.min(best, MP.directSeconds(m, [r.person.lat, r.person.lon], [x.lat, x.lon]));
+        if (r.tr) g.stations.forEach((s, i) => { const d = MP.hav([x.lat, x.lon], [s[2], s[3]]); if (d <= 900 && r.tr.dist[i] < Infinity) best = Math.min(best, r.tr.dist[i] + d * 1.3 / 1.25); });
+        return best / 60;
+      };
+      const w = ppl.map(p => p.weight), ww = w.concat(w);
+      let best = Infinity;
+      places.forEach((x) => { const t = res.per.map(r => time(r, x)).concat(res.back.map(r => time(r, x))); if (t.every(isFinite)) best = Math.min(best, score(t, ww)); });
+      if (!res.top.length) { assert.strictEqual(best, Infinity); continue; }
+      checked++;
+      const x = places[res.top[0].c], t = res.per.map(r => time(r, x)).concat(res.back.map(r => time(r, x)));
+      assert(Math.abs(score(t, ww) - best) < (obj === "max" ? 1e-3 : 1e-9), `${obj}: best place is not minimal`);
+      // the legs rebuilt for the winner add up to the time, including the final walk
+      res.per.forEach((r, i) => { const legs = MP.itineraryPlace(net, r, res.cands, res.top[0].c); assert(Math.abs(legs.reduce((s, l) => s + (l.wait || 0) + l.sec, 0) / 60 - res.top[0].times[i]) < 0.02, "place legs add up"); });
+      // kept results are at least 500 m apart
+      res.top.forEach((a, i) => res.top.slice(i + 1).forEach(b => assert(MP.hav([a.place.lat, a.place.lon], [b.place.lat, b.place.lon]) >= 500, "places spaced out")));
+    }
+  }
+  // a car driver goes straight to the place: no stop involved
+  const drv = [{ lat: 48.85, lon: 2.30, weight: 1, modes: { car: true, walk: false, transit: false, bike: false }, ret: null }, { lat: 48.88, lon: 2.40, weight: 1, modes: { car: true, walk: false, transit: false, bike: false }, ret: null }];
+  const rd = MP.solve(net, drv, { objective: "max", top: 1, places });
+  assert(MP.itineraryPlace(net, rd.per[0], rd.cands, rd.top[0].c).length === 1, "drivers get a single direct leg");
+  console.log("any-place scoring ok:", checked, "checks over", places.length, "places");
+}

@@ -9,6 +9,7 @@
   const BIKE_FIXED = 180, CAR_FIXED = 480;            // lock-up / parking, seconds
   const MAX_WALK_ACCESS_M = 2200, MAX_BIKE_ACCESS_M = 6500;
   const MAX_WALK_BUS_M = 1200, MAX_BIKE_BUS_M = 3000;   // tighter access limits for bus stops
+  const EGRESS_RAIL_M = 900, EGRESS_BUS_M = 500;       // longest walk from the stop where someone gets off to a meeting place that is not a stop
 
   function hav(a, b) {                                // metres
     const R = 6371000, r = Math.PI / 180;
@@ -123,7 +124,7 @@
       tr = net.dijkstra(init);
       for (let i = 0; i < net.R; i++) if (tr.dist[i] < sec[i]) { sec[i] = tr.dist[i]; how[i] = 4; }
     }
-    return { sec, how, tr, access, person };
+    return { sec, how, tr, access, person, direct };
   }
 
   /* Scores over the list of trip times t (minutes, one entry per person and direction) with weights w.
@@ -137,29 +138,76 @@
     balanced: (t, w) => Math.sqrt(t.reduce((s, x, i) => s + x * x * w[i], 0) / w.reduce((a, b) => a + b, 0)),
   };
 
+  /* ---- meeting places that are not stops (cafés, restaurants, bars, parks) ----
+     Someone who travels by public transport gets off at a stop near the place and walks the rest; someone who walks, bikes or drives
+     goes straight there. So a place's time for one person is the smaller of: the direct trip, and (arrival time at a nearby stop + the walk). */
+  function stopsNear(net, lat, lon) {                 // [{s, sec}]: stops within the walking limit of a point, with the walk time
+    const st = net.graph.stations, g = net._grid || (net._grid = (() => {
+      const m = new Map();
+      st.forEach((q, i) => { const k = Math.floor(q[2] * 100) + "," + Math.floor(q[3] * 66.7); (m.get(k) || m.set(k, []).get(k)).push(i); });
+      return m;
+    })());
+    const a = Math.floor(lat * 100), o = Math.floor(lon * 66.7), out = [];
+    for (let da = -1; da <= 1; da++) for (let dobj = -1; dobj <= 1; dobj++) {
+      for (const i of g.get((a + da) + "," + (o + dobj)) || []) {
+        const d = hav([lat, lon], [st[i][2], st[i][3]]);
+        if (d <= (i >= net.R ? EGRESS_BUS_M : EGRESS_RAIL_M)) out.push({ s: i, sec: d * DETOUR.walk / SPEED.walk });
+      }
+    }
+    return out;
+  }
+  /* places: [{name, lat, lon, kind}] -> same list with the nearby stops worked out once (shared by every person) */
+  function placeCandidates(net, places) {
+    if (net._cands && net._cands.src === places) return net._cands.list;
+    const list = places.map((x) => Object.assign({}, x, { near: stopsNear(net, x.lat, x.lon) }));
+    net._cands = { src: places, list }; return list;
+  }
+  function placeSeconds(res, cands) {                 // Float64Array: this person's time to every candidate place
+    if (res.placeSec) return res.placeSec;
+    const p = res.person, here = [p.lat, p.lon], out = new Float64Array(cands.length).fill(Infinity), tr = res.tr;
+    cands.forEach((x, i) => {
+      let best = Infinity;
+      for (const mode of res.direct) { const t = directSeconds(mode, here, [x.lat, x.lon]); if (t < best) best = t; }
+      if (tr) for (const n of x.near) { const t = tr.dist[n.s] + n.sec; if (t < best) best = t; }
+      out[i] = best;
+    });
+    return (res.placeSec = out);
+  }
+
   /* A person may come back to a different place: person.ret = {lat, lon} (absent = same as the start).
      Both directions count as separate trips in every score, so a person who returns to the same
      address simply counts twice (max and balanced are unchanged, sum is doubled for everybody alike).
      The way back is timed as the way there from that address (the network is symmetric enough).
-     opts: {objective, maxMinutes, top} */
+     opts: {objective, maxMinutes, top, places}. With opts.places ([{name, lat, lon, kind}]) the candidates are those places instead
+     of the stations; a row's c is then an index into places and row.place is the place. */
   function solve(net, people, opts) {
-    opts = Object.assign({ objective: "max", maxMinutes: 0, top: 3 }, opts);
+    opts = Object.assign({ objective: "max", maxMinutes: 0, top: 3, places: null }, opts);
     const per = people.map(p => personTimes(net, p));
-    const back = people.map((p, i) => p.ret ? personTimes(net, Object.assign({}, p, { lat: p.ret.lat, lon: p.ret.lon })) : per[i]);
+    const back = people.map((p, i) => p.ret ? personTimes(net, Object.assign({}, p, { ret: null, lat: p.ret.lat, lon: p.ret.lon })) : per[i]);
     const w = people.map(p => p.weight || 1), ww = w.concat(w), st = net.graph.stations;
+    const cands = opts.places ? placeCandidates(net, opts.places) : null;
+    const secOut = cands ? per.map(r => placeSeconds(r, cands)) : per.map(r => r.sec);
+    const secBack = cands ? back.map(r => placeSeconds(r, cands)) : back.map(r => r.sec);
     const rows = [];
-    for (let c = 0; c < net.R; c++) {
-      const out = per.map(r => r.sec[c] / 60), ret = back.map(r => r.sec[c] / 60), t = out.concat(ret);
+    for (let c = 0, n = cands ? cands.length : net.R; c < n; c++) {
+      const out = secOut.map(a => a[c] / 60), ret = secBack.map(a => a[c] / 60), t = out.concat(ret);
       if (t.some(x => !isFinite(x))) continue;
       const max = Math.max(...t);
-      rows.push({ c, hub: st[c][4], score: AGG[opts.objective](t, ww), times: out, back: ret, sum: t.reduce((a, b) => a + b, 0), max, over: opts.maxMinutes > 0 && max > opts.maxMinutes });
+      rows.push({ c, hub: cands ? c : st[c][4], score: AGG[opts.objective](t, ww), times: out, back: ret, sum: t.reduce((a, b) => a + b, 0), max, over: opts.maxMinutes > 0 && max > opts.maxMinutes });
     }
     let pool = rows.filter(r => !r.over), relaxed = false;
     if (!pool.length) { pool = rows; relaxed = true; }
     pool.sort((a, b) => a.score - b.score);
     const seen = new Set(), top = [];
-    for (const r of pool) { if (seen.has(r.hub)) continue; seen.add(r.hub); top.push(r); if (top.length >= opts.top) break; }
-    return { top, relaxed, per, back, rows };
+    for (const r of pool) {
+      if (cands) {                                      // places: keep the best, skip any within 500 m of one already kept
+        const x = cands[r.c];
+        if (top.some(q => hav([x.lat, x.lon], [cands[q.c].lat, cands[q.c].lon]) < 500)) continue;
+        r.place = { name: x.name, lat: x.lat, lon: x.lon, kind: x.kind };
+      } else { if (seen.has(r.hub)) continue; seen.add(r.hub); }
+      top.push(r); if (top.length >= opts.top) break;
+    }
+    return { top, relaxed, per, back, rows, cands };
   }
 
   /* Itinerary for one person to station c: list of legs
@@ -171,6 +219,12 @@
     if (res.how[c] !== 4) {
       return [{ mode: NAME[res.how[c]], label: NAME[res.how[c]], color: null, coords: [here, there], sec: res.sec[c] }];
     }
+    return transitLegs(net, res, c);
+  }
+
+  /* the public transport journey to stop c (whatever else would be faster): access, waits, rides, transfers */
+  function transitLegs(net, res, c) {
+    const st = net.graph.stations, g = net.graph, S = net.S, p = res.person, here = [p.lat, p.lon];
     const tr = res.tr, chain = [];
     for (let u = c; u !== -1; u = tr.prev[u]) chain.push(u);
     chain.reverse();                                   // node path, first is an access station
@@ -195,6 +249,18 @@
     return legs;
   }
 
+  /* Itinerary to a meeting place (an entry of the candidate list): straight there, or public transport to the best stop and a walk. */
+  function itineraryPlace(net, res, cands, c) {
+    const x = cands[c], p = res.person, here = [p.lat, p.lon], there = [x.lat, x.lon], NAME = { 1: "walk", 2: "bike", 3: "car" };
+    let best = { t: Infinity };
+    for (const mode of res.direct) { const t = directSeconds(mode, here, there); if (t < best.t) best = { t, mode }; }
+    if (res.tr) for (const n of x.near) { const t = res.tr.dist[n.s] + n.sec; if (t < best.t) best = { t, s: n.s, walk: n.sec }; }
+    if (best.mode) return [{ mode: best.mode, label: best.mode, color: null, coords: [here, there], sec: best.t }];
+    const st = net.graph.stations, legs = transitLegs(net, res, best.s);
+    legs.push({ mode: "walk", label: "walk", color: null, coords: [[st[best.s][2], st[best.s][3]], there], sec: best.walk });
+    return legs;
+  }
+
   /* The same itinerary read the other way: from the meeting point to where the person is going. */
   function reverseLegs(legs) {
     return legs.slice().reverse().map(l => Object.assign({}, l, { coords: l.coords.slice().reverse() }));
@@ -211,6 +277,6 @@
     });
   }
 
-  const api = { mergeGraph, Network, hav, directSeconds, personTimes, solve, itinerary, reverseLegs, AGG };
+  const api = { mergeGraph, Network, hav, directSeconds, personTimes, solve, itinerary, itineraryPlace, reverseLegs, stopsNear, AGG };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.MP = api;
 })(typeof window !== "undefined" ? window : globalThis);

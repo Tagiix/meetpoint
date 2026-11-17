@@ -24,6 +24,8 @@ on foot (≤ 2.2 km) or by bike (≤ 6.5 km; buses: 1.2 km and 3 km). The person
 A person with only "transit" ticked still walks to stations; "walk" controls direct walking trips.
 
 Solving runs in a Web Worker so the page never freezes (`assets/solve-worker.js` hosts `assets/engine-core.js`; `assets/engine.js` is the client, with a same-code fallback on the page thread).
+With the event option `where: "places"` the candidates are about 26,000 named restaurants, cafés, bars and parks instead of stations: a person's time to a place is the smaller of the direct trip
+and (arrival at a stop within 900 m, 500 m for bus stops, plus the walk); results are at least 500 m apart. The place list is loaded by the engine itself (worker), not sent on each solve.
 `solve()` scores every rail station over the list of trip times (one per person and direction, so each person counts twice; the way back uses the person's `ret`
 address when set, timed like the way there from that address, and counts as a duplicate of the way there otherwise). Scores are generalized means, checkable by hand:
 `max` (longest trip, mean as tie-break), `sum` (weighted mean), `balanced` (weighted root-mean-square). Nothing but travel time enters a score.
@@ -60,7 +62,7 @@ Each person: `{id, name, addr, lat, lon, weight, modes, hash}`. Reads and writes
 | `POST {action:"join", id, p}` | knowing the id | adds a position, returns `{pid, token}` |
 | `POST {action:"update", id, pid, token \| adminKey, p}` | entry token or organizer | edit an entry (`p.ret` = way-back address or null) |
 | `POST {action:"leave", id, pid, token \| adminKey}` | entry token or organizer | remove an entry |
-| `POST {action:"options", id, adminKey, title?, options}` | organizer | settings and title |
+| `POST {action:"options", id, adminKey, title?, options}` | organizer | settings and title (`options.where`: `stations` or `places`) |
 | `POST {action:"delete", id, adminKey}` | organizer | delete the event |
 
 Per-browser secrets (organizer key, entry tokens) are kept in `localStorage` under `meetpoint:v2`.

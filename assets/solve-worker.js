@@ -14,6 +14,7 @@ self.onmessage = async (e) => {
     } else if (m.type === "solve") result = await core.solve(m.seq, m.o, m.people, m.opts);
     else if (m.type === "itineraries") result = core.itineraries(m.seq, m.c);
     else if (m.type === "warm") result = await core.warm(m.o);
+    else if (m.type === "warmPlaces") result = await core.warmPlaces();
     else throw new Error("unknown message " + m.type);
     self.postMessage({ id: m.id, ok: true, result });
   } catch (err) { self.postMessage({ id: m.id, ok: false, error: String(err && err.message || err) }); }

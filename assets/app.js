@@ -10,7 +10,8 @@
   const IDF = /^(75|77|78|91|92|93|94|95)/;
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-  const DEFAULT_OPTS = { objective: "max", profile: 0, maxmin: 0, buses: false };
+  const DEFAULT_OPTS = { objective: "max", where: "stations", profile: 0, maxmin: 0, buses: false };
+  const WHERE = [["stations", "A station"], ["places", "Any place"]];
   const DEFAULT_MODES = { walk: true, transit: true, bike: false, car: false };
 
   /* ---------- state ---------- */
@@ -85,6 +86,7 @@
     if (detail) { await addChunked("roads", detail.secondary || [], { tier: 2 }); await addChunked("roads", detail.tertiary || [], { tier: 3 }); base.draw(); }
     if (bus) { for (const l of bus) base.addLines("bus", l.p, {}); await later(); base.draw(); }
     ensureBusGraph().catch(() => {});                    // for the station search
+    engine.warmPlaces().catch(() => {});
     engine.warm({ profile: 0, buses: true }).then(() => (busWarm = true)).catch(() => {});    // the worker builds the bus network now, so turning buses on later is instant
   }
   let graphBus = null;
@@ -101,7 +103,18 @@
     $("lg-bus").onchange = (e) => { base.show.bus = e.target.checked; base.draw(); };
   }
 
-  function targetPoint() { const st = graphBase.stations[result.top[selected].c]; return [st[2], st[3]]; }
+  /* what a result row points at: a station, or a place (café, restaurant, bar, park) */
+  const KIND = { r: "Restaurant", c: "Café", b: "Bar", park: "Park" };
+  function nearestStation(lat, lon) {
+    let best = null, bd = Infinity;
+    for (let i = 0; i < (graphBase.railCount || graphBase.stations.length); i++) { const st = graphBase.stations[i], d = Math.hypot((st[2] - lat) * 111, (st[3] - lon) * 73); if (d < bd) { bd = d; best = st; } }
+    return best;
+  }
+  function targetOf(r) {
+    if (r.place) { const near = nearestStation(r.place.lat, r.place.lon); return { name: r.place.name, lat: r.place.lat, lon: r.place.lon, sub: `${KIND[r.place.kind] || "Place"}${near ? " · near " + near[1] : ""}` }; }
+    const st = graphBase.stations[r.c]; return { name: st[1], lat: st[2], lon: st[3], sub: "" };
+  }
+  function targetPoint() { const t = targetOf(result.top[selected]); return [t.lat, t.lon]; }
   function fitView() {
     const pts = (S.ev ? S.ev.people.flatMap((p) => (hasRet(p) ? [[p.lat, p.lon], [p.ret.lat, p.ret.lon]] : [[p.lat, p.lon]])) : []);
     if (result) pts.push(targetPoint());
@@ -136,6 +149,9 @@
       <div class="field"><label>Optimize for</label>
         <div class="seg ${editable ? "edit" : ""}">${OBJECTIVES.map(([v, l, t]) => `<button type="button" data-opt="objective" data-v="${v}" title="${esc(t)}" class="${o.objective === v ? "on" : ""}"${dis}>${l}</button>`).join("")}</div>
         <p class="small muted">${obj[2]}</p></div>
+      <div class="field"><label>Meet at</label>
+        <div class="seg ${editable ? "edit" : ""}">${WHERE.map(([v, l]) => `<button type="button" data-opt="where" data-v="${v}" class="${(o.where || "stations") === v ? "on" : ""}"${dis}>${l}</button>`).join("")}</div>
+        <p class="small muted">${(o.where || "stations") === "places" ? "Any named café, restaurant, bar or park. People on public transport get off at the nearest stop and walk (up to 15 min); the others go straight there." : "A metro, RER, train or tram station."}</p></div>
       <div class="field"><label>Day</label>
         <div class="seg ${editable ? "edit" : ""}">${[["0", "Weekday"], ["1", "Weekend"]].map(([v, l]) => `<button type="button" data-opt="profile" data-v="${v}" class="${String(o.profile) === v ? "on" : ""}"${dis}>${l}</button>`).join("")}</div></div>
       <label class="switch"><span>Include buses in trips<br><span class="small muted">Loads more data, a bit slower</span></span><input type="checkbox" data-opt="buses" ${o.buses ? "checked" : ""}${dis}></label>
@@ -413,7 +429,7 @@
     const people = ps.map((p) => Object.assign({}, p, { ret: hasRet(p) ? p.ret : null }));
     if (o.buses && !busWarm) notice("Loading the bus network…");
     let r;
-    try { r = await engine.solve({ profile: o.profile, buses: o.buses }, people, { objective: o.objective, maxMinutes: o.maxmin, top: 3 }); }
+    try { r = await engine.solve({ profile: o.profile, buses: o.buses }, people, { objective: o.objective, maxMinutes: o.maxmin, top: 3, where: o.where }); }
     catch (e) { return notice("Could not compute the meeting point (" + e.message + ")." + (o.buses ? " Turn buses off or run tools/build_bus.py." : ""), "warn"); }
     if (o.buses && !busWarm) { busWarm = true; notice(""); }
     if (!r) return;                                      // a newer request replaced this one
@@ -431,11 +447,10 @@
   }
   function renderCards() {
     const relaxedLimit = result.relaxedLimit;
-    const st = graphBase.stations;
     $("cards").innerHTML = (relaxedLimit ? `<div class="msg warn">Nobody could stay under ${relaxedLimit} min. Showing the closest options.</div>` : "") +
       result.top.map((r, k) => `
       <div class="card res ${k === selected ? "on" : ""}" data-k="${k}" role="button" tabindex="0">
-        <div class="t"><b>${esc(st[r.c][1])}</b><span class="rank">#${k + 1}</span></div>
+        <div class="t"><b>${esc(targetOf(r).name)}</b><span class="rank">#${k + 1}</span></div>${targetOf(r).sub ? `<div class="small muted" style="margin:-4px 0 6px">${esc(targetOf(r).sub)}</div>` : ""}
         <div class="times">${S.ev.people.map((p, i) => `
           <span style="color:${COLORS[i]}">●</span><span class="bar" title="${esc(p.name)}"><i style="width:${Math.min(100, Math.max(r.times[i], r.back[i]) / (r.max || 1) * 100)}%;background:${COLORS[i]}"></i></span><span data-t="${k}-${i}">${Math.round(r.times[i])} min${result.people[i].ret ? ` · ↩ ${Math.round(r.back[i])}` : ""}</span>`).join("")}</div>
         <div class="meta">Longest ${Math.round(r.max)} min · average ${Math.round(r.sum / (r.times.length + r.back.length))} min</div>
@@ -444,7 +459,7 @@
 
   /* ---------- selection, routes, animation ---------- */
   async function select(k) {
-    selected = k; const my = ++token, r = result.top[k], st = graphBase.stations[r.c], people = result.people;
+    selected = k; const my = ++token, r = result.top[k], tg = targetOf(r), people = result.people;
     document.querySelectorAll("#cards .res").forEach((el) => el.classList.toggle("on", +el.dataset.k === k));
     let iti; try { iti = await engine.itineraries(result.seq, r.c); } catch (e) { return; }   // the engine rebuilds the legs
     if (my !== token) return;
@@ -455,12 +470,12 @@
     if (!anyBack) dirn = "out";
     $("dir").hidden = !anyBack; $("dir").value = dirn;
     curRoutes = { out, back };
-    const target = [st[2], st[3]];
+    const target = [tg.lat, tg.lon];
     if (targetMarker) targetMarker.remove();
-    targetMarker = L.marker(target, { icon: L.divIcon({ className: "", html: '<div class="target">★</div>', iconSize: [34, 34], iconAnchor: [17, 17] }), zIndexOffset: 1000 }).addTo(map).bindTooltip(st[1], { direction: "top", offset: [0, -18] });
+    targetMarker = L.marker(target, { icon: L.divIcon({ className: "", html: '<div class="target">★</div>', iconSize: [34, 34], iconAnchor: [17, 17] }), zIndexOffset: 1000 }).addTo(map).bindTooltip(tg.name, { direction: "top", offset: [0, -18] });
     fitView();
     $("player").hidden = false; flow.setRoutes(curRoutes[dirn], target);   // shown paused: the animation starts on Play, not by itself
-    loadPlaces(st);
+    loadPlaces([0, tg.name, tg.lat, tg.lon]);
     await new Promise((r) => setTimeout(r, 500)); if (my !== token) return;      // skip the lookups while someone is clicking through the cards
     await refine(out.concat(back || []), my);          // real street geometry for walk/bike/car legs
     if (my !== token) return;

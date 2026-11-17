@@ -52,6 +52,7 @@ function clean_options($o) {
     return [
         'objective' => in_array($o['objective'] ?? '', ['max', 'sum', 'balanced'], true) ? $o['objective'] : 'max',
         'profile' => (int)($o['profile'] ?? 0) === 1 ? 1 : 0,
+        'where' => ($o['where'] ?? '') === 'places' ? 'places' : 'stations',     // meet at a station, or at any café, restaurant, bar or park
         'maxmin' => max(0, min(180, (int)($o['maxmin'] ?? 0))),
         'buses' => !empty($o['buses']),
     ];

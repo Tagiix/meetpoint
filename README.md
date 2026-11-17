@@ -6,7 +6,7 @@ buses). The best meeting stations update live and an animation shows everybody t
 
 - Optimizes for the **fairest** meeting point (shortest longest trip), the **fastest overall** (least total time) or **balanced** (root-mean-square of trip times). Only measurable travel times are used.
 - Each person can give a different address for the way back; both directions count as trips. Addresses can be typed, picked on the map (click a station to snap to it) or searched as a metro/RER/bus station.
-- The organizer can edit or remove anybody's entry.
+- The organizer can edit or remove anybody's entry. The meeting point can be a station or any named café, restaurant, bar or park (people on public transport get off at the nearest stop and walk).
 - Optional limits: longest acceptable trip, weekday or weekend timetables.
 - Abstract map built from open data: rail lines in official colours, roads, the Seine, parks, towns, and every
   restaurant, café and bar. No map tile service, no API keys.

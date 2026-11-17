@@ -57,9 +57,16 @@ minimize the longest trip, restaurants nearby), a nice flow animation, and the *
   (newest request wins while one is running; same code on the page thread if the worker cannot start). The heavy per-station table never leaves the worker, only the top 3 and, on selection, the legs.
   Measured with 10 people, switching buses on: worst frame gap 17 ms with the worker against 217 ms on the page thread (the old behaviour); identical results.
 
+## Round 5: meeting places other than stations (branch `feature/any-place`)
+- New event option `where`: `stations` (default) or `places`: any named restaurant, café, bar (`pois.json`) or park (`green.json` names), about 26,000 candidates.
+- Time to a place for one person = min(direct trip by walk/bike/car, arrival at a stop within 900 m of the place (500 m for bus stops) + the walk). Same scoring for every objective and for the way back;
+  results are at least 500 m apart. `solver.js`: `stopsNear`, `placeCandidates`, `placeSeconds`, `itineraryPlace`; the place list lives in the engine (worker), so it is never sent on each solve.
+- Insight that shaped it: for people on public transport a place is "a stop plus a walk", so a station is never worse than the places beside it; "any place" matters mainly for car, bike and walking, and for
+  turning the answer into an actual place to sit down. On a 10-person sample the best station was 31 min, the best place 33 min (rail only).
+- Tests: brute force over all stops (no grid) for the 3 objectives, legs add up including the final walk, spacing, drivers get one direct leg. Solve time with all places and 10 people: ~50 ms (rail), 590 ms with buses (in the worker).
+
 ## Not done / ideas
-- Meeting points other than stations (squares, parks, restaurants themselves).
-- Live traffic and real-time departures; PRIM/Navitia API integration for exact journeys.
+- Live traffic and real-time departures: **decided against** (2026-11-17). It needs the transport authority's API key (so a server-side proxy), rate-limit handling and per-person queries that cannot be precomputed, which breaks the "basic server, everything in the browser" design; the timetable model is already within a few minutes.
 - Activity filter (parks, culture, cinemas) beyond food and drink; French interface.
 - Rate limiting; event expiry is only 90 days after last write.
 - A licence file for the repository.

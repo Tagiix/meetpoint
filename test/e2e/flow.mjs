@@ -84,6 +84,15 @@ await A.waitForFunction(() => /↩/.test(document.querySelector('.res')?.textCon
 check('result cards show the way back', true);
 await A.locator('.person[data-pid]').nth(0).locator('[data-act=edit]').click();
 
+// meeting at any place (café, restaurant, bar, park) instead of a station
+await A.click('button[data-opt=where][data-v=places]'); await A.waitForTimeout(2500);
+check('"Meet at: any place" saved', (await event()).options.where === 'places');
+const sub = await A.locator('.res .small.muted').first().textContent().catch(() => '');
+check('results are places, with the nearest station', /(Restaurant|Café|Bar|Park) · near /.test(sub), sub);
+await A.screenshot({ path: 'shots/any-place.png' });
+await A.click('button[data-opt=where][data-v=stations]'); await A.waitForTimeout(1500);
+check('back to stations', (await event()).options.where === 'stations');
+
 // organizer changes a setting; guest edits their own entry; organizer removes the guest
 await A.click('button[data-opt=objective][data-v=balanced]'); await A.waitForTimeout(1000);
 check('organizer setting saved', (await event()).options.objective === 'balanced');

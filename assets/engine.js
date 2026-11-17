@@ -39,6 +39,7 @@
       if (type === "solve") return core.solve(args.seq, args.o, args.people, args.opts);
       if (type === "itineraries") return core.itineraries(args.seq, args.c);
       if (type === "warm") return core.warm(args.o);
+      if (type === "warmPlaces") return core.warmPlaces();
     }
     /* newest request wins: while one solve runs, only the latest waiting request is kept, older ones resolve to null */
     solve(o, people, opts) {
@@ -54,6 +55,7 @@
     }
     itineraries(seq, c) { return this.call("itineraries", { seq, c }); }
     warm(o) { return this.call("warm", { o }); }
+    warmPlaces() { return this.call("warmPlaces", {}); }
   }
   root.Engine = Engine;
 })(window);
