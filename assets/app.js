@@ -15,7 +15,7 @@
 
   /* ---------- state ---------- */
   const S = { api: true, ev: null, admin: null, mine: {}, draftOpts: Object.assign({}, DEFAULT_OPTS), title: "", draft: blankDraft(), editing: null, picking: null };            // picking: which address field the next map click fills (see addrField)
-  let graphBase = null, nets = {}, result = null, selected = 0, token = 0, lastSig = "", pollTimer = null;
+  let graphBase = null, result = null, busWarm = false, selected = 0, token = 0, lastSig = "", pollTimer = null;
   let markers = [], draftMarkers = [], dirn = "out", curRoutes = null, targetMarker = null, solveTimer = null, optTimer = null, sugg = [], suggTimer = null;
 
   function blankDraft() { return { name: "", addr: "", lat: null, lon: null, modes: Object.assign({}, DEFAULT_MODES), retOn: false, ret: { addr: "", lat: null, lon: null } }; }
@@ -84,7 +84,8 @@
     const [detail, bus] = await Promise.all([getJson("roads-detail"), getJson("bus-lines")]);   // downloads run together, building one after the other
     if (detail) { await addChunked("roads", detail.secondary || [], { tier: 2 }); await addChunked("roads", detail.tertiary || [], { tier: 3 }); base.draw(); }
     if (bus) { for (const l of bus) base.addLines("bus", l.p, {}); await later(); base.draw(); }
-    ensureBusGraph().then(() => getNet({ profile: 0, buses: true })).catch(() => {});    // so turning buses on later is instant
+    ensureBusGraph().catch(() => {});                    // for the station search
+    engine.warm({ profile: 0, buses: true }).then(() => (busWarm = true)).catch(() => {});    // the worker builds the bus network now, so turning buses on later is instant
   }
   let graphBus = null;
   async function ensureBusGraph() { return graphBus || (graphBus = await (await fetch(dataUrl("graph-bus"))).json()); }
@@ -100,7 +101,7 @@
     $("lg-bus").onchange = (e) => { base.show.bus = e.target.checked; base.draw(); };
   }
 
-  function targetPoint() { const st = result.net.graph.stations[result.top[selected].c]; return [st[2], st[3]]; }
+  function targetPoint() { const st = graphBase.stations[result.top[selected].c]; return [st[2], st[3]]; }
   function fitView() {
     const pts = (S.ev ? S.ev.people.flatMap((p) => (hasRet(p) ? [[p.lat, p.lon], [p.ret.lat, p.ret.lon]] : [[p.lat, p.lon]])) : []);
     if (result) pts.push(targetPoint());
@@ -398,16 +399,9 @@
   document.addEventListener("pointerdown", () => { idle = 0; });
 
   /* ---------- solving and results ---------- */
-  async function getNet(o) {
-    const key = o.profile + (o.buses ? "b" : "r");
-    if (nets[key]) return nets[key];
-    let g = graphBase;
-    if (o.buses) {
-      if (!graphBus) { notice("Loading the bus network…"); await ensureBusGraph(); notice(""); }
-      g = MP.mergeGraph(graphBase, graphBus);
-    }
-    return (nets[key] = new MP.Network(g, o.profile));
-  }
+  // Solving runs in a Web Worker (assets/engine.js): the page never freezes, whatever the size of the network. Same code on the page thread if no worker.
+  const engine = new Engine({ build: BUILD, dataBase: new URL("data/", location.href).href });
+  window.__meetpointEngine = engine;
   function scheduleSolve(force) { clearTimeout(solveTimer); solveTimer = setTimeout(() => solveNow(force), 150); }
   async function solveNow(force) {
     if (!S.ev || !graphBase) return;
@@ -416,11 +410,15 @@
     if (sig === lastSig && !force) return; lastSig = sig;
     const sec = $("v-results"); if (!sec) return; sec.hidden = false;
     if (ps.length < 2) { clearResult(); $("cards").innerHTML = '<div class="empty">Add at least two people to see the best meeting point.</div>'; return; }
-    let net; try { net = await getNet(o); } catch (e) { return notice("Could not load the bus network. Turn buses off or run tools/build_bus.py.", "warn"); }
-    const keep = result && result.top[selected] ? result.top[selected].c : null;
     const people = ps.map((p) => Object.assign({}, p, { ret: hasRet(p) ? p.ret : null }));
-    result = MP.solve(net, people, { objective: o.objective, maxMinutes: o.maxmin, top: 3 });
-    result.net = net; result.people = people;
+    if (o.buses && !busWarm) notice("Loading the bus network…");
+    let r;
+    try { r = await engine.solve({ profile: o.profile, buses: o.buses }, people, { objective: o.objective, maxMinutes: o.maxmin, top: 3 }); }
+    catch (e) { return notice("Could not compute the meeting point (" + e.message + ")." + (o.buses ? " Turn buses off or run tools/build_bus.py." : ""), "warn"); }
+    if (o.buses && !busWarm) { busWarm = true; notice(""); }
+    if (!r) return;                                      // a newer request replaced this one
+    const keep = result && result.top[selected] ? result.top[selected].c : null;
+    result = { top: r.top, relaxed: r.relaxed, people, seq: r.seq };
     if (!result.top.length) { clearResult(); $("cards").innerHTML = '<div class="empty">No meeting point is reachable for everyone. Check that each person can reach the rail network with a mode they ticked.</div>'; return; }
     const same = result.top.findIndex((r) => r.c === keep);
     result.relaxedLimit = result.relaxed ? o.maxmin : 0;
@@ -433,7 +431,7 @@
   }
   function renderCards() {
     const relaxedLimit = result.relaxedLimit;
-    const st = result.net.graph.stations;
+    const st = graphBase.stations;
     $("cards").innerHTML = (relaxedLimit ? `<div class="msg warn">Nobody could stay under ${relaxedLimit} min. Showing the closest options.</div>` : "") +
       result.top.map((r, k) => `
       <div class="card res ${k === selected ? "on" : ""}" data-k="${k}" role="button" tabindex="0">
@@ -446,12 +444,14 @@
 
   /* ---------- selection, routes, animation ---------- */
   async function select(k) {
-    selected = k; const my = ++token, r = result.top[k], st = result.net.graph.stations[r.c], people = result.people;
+    selected = k; const my = ++token, r = result.top[k], st = graphBase.stations[r.c], people = result.people;
     document.querySelectorAll("#cards .res").forEach((el) => el.classList.toggle("on", +el.dataset.k === k));
-    const anyBack = people.some((p) => p.ret);
+    let iti; try { iti = await engine.itineraries(result.seq, r.c); } catch (e) { return; }   // the engine rebuilds the legs
+    if (my !== token) return;
+    const anyBack = !!iti.back;
     const route = (p, i, legs) => ({ name: p.name, color: COLORS[i], legs });
-    const out = people.map((p, i) => route(p, i, MP.itinerary(result.net, result.per[i], r.c)));
-    const back = anyBack ? people.map((p, i) => route(p, i, MP.reverseLegs(MP.itinerary(result.net, result.back[i], r.c)))) : null;
+    const out = people.map((p, i) => route(p, i, iti.out[i]));
+    const back = anyBack ? people.map((p, i) => route(p, i, iti.back[i])) : null;
     if (!anyBack) dirn = "out";
     $("dir").hidden = !anyBack; $("dir").value = dirn;
     curRoutes = { out, back };

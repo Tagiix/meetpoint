@@ -27,6 +27,7 @@ Node: `node --check assets/*.js`. PHP: `php -l api/meetup.php`.
 ## Layout
 | Path | Role |
 |---|---|
+| `assets/engine-core.js`, `assets/solve-worker.js`, `assets/engine.js` | the solving engine (no DOM), the Web Worker hosting it, and the page-side client with a page-thread fallback |
 | `index.php` | single page shell (PHP only to stamp `?v=<build id>` on every asset URL); scripts in order: Leaflet (CDN), solver, flow, basemap, api, app |
 | `api/build.php`, `api/_build.inc.php` | build id = hash of file sizes and mtimes; the open page polls it every minute and reloads itself on a change |
 | `assets/solver.js` | pure functions (browser and node): graph routing (Dijkstra per person), multi-person scoring, itinerary legs |

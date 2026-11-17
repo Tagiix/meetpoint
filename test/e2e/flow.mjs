@@ -47,6 +47,7 @@ await A.waitForFunction(() => document.querySelector('#count')?.textContent.star
 check('organizer sees the guest by polling', true);
 await A.waitForSelector('.res');
 check('three ranked results', (await A.locator('.res').count()) === 3);
+check('solving runs in a Web Worker', (await A.evaluate(() => window.__meetpointEngine.mode)) === 'worker');
 check('animation does not start by itself', (await A.locator('#play').textContent()).trim() === '▶');
 await A.click('#play'); await A.waitForTimeout(400);
 check('Play starts it', (await A.locator('#play').textContent()).trim() === '❚❚');

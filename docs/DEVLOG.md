@@ -53,9 +53,11 @@ minimize the longest trip, restaurants nearby), a nice flow animation, and the *
   tab is shown again, and reloads itself on a change (it waits, with a "reload" link, if someone is typing or has a half-filled form; a sessionStorage guard prevents reload loops). No build step, any PHP server.
 - **Address dropdown**: stations (rail, and bus stops once loaded) are matched locally and shown instantly above the address results, ignoring case, accents, apostrophes and spaces; keyboard: arrows, Tab/Shift+Tab, Enter (first entry if none highlighted), Escape.
 - **"Far east" results (user report)**: not reproducible on a fresh load (about 1,500 random western groups gave none); the owner confirmed they were caused by stale cached files from before an update. Prevented by the auto-update (versioned URLs).
+- **Solving in a Web Worker** (branch `feature/web-worker`). `assets/engine-core.js` (graphs, networks, solve, itineraries; no DOM) runs in `assets/solve-worker.js`; `assets/engine.js` is the page-side client
+  (newest request wins while one is running; same code on the page thread if the worker cannot start). The heavy per-station table never leaves the worker, only the top 3 and, on selection, the legs.
+  Measured with 10 people, switching buses on: worst frame gap 17 ms with the worker against 217 ms on the page thread (the old behaviour); identical results.
 
 ## Not done / ideas
-- **Next step: solve in a Web Worker.** Solving with buses on takes ~250 ms on the page's own thread (rail only: ~10 ms), freezing the page on every change. `assets/solver.js` is pure, so it can run in a worker: the graph and `Network` would live there, the page sends people and options and gets the ranking back, and asks the worker for the itinerary of the selected result (it is rebuilt from the solver's internal Dijkstra data). Needs: message plumbing both ways, a fallback to the main thread if the worker fails to start, tests. Worth doing if buses-on is used a lot.
 - Meeting points other than stations (squares, parks, restaurants themselves).
 - Live traffic and real-time departures; PRIM/Navitia API integration for exact journeys.
 - Activity filter (parks, culture, cinemas) beyond food and drink; French interface.

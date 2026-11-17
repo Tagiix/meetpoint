@@ -23,6 +23,7 @@ car with a distance-based speed model + 8 min parking) and a multi-source Dijkst
 on foot (≤ 2.2 km) or by bike (≤ 6.5 km; buses: 1.2 km and 3 km). The person's time to a station is the minimum.
 A person with only "transit" ticked still walks to stations; "walk" controls direct walking trips.
 
+Solving runs in a Web Worker so the page never freezes (`assets/solve-worker.js` hosts `assets/engine-core.js`; `assets/engine.js` is the client, with a same-code fallback on the page thread).
 `solve()` scores every rail station over the list of trip times (one per person and direction, so each person counts twice; the way back uses the person's `ret`
 address when set, timed like the way there from that address, and counts as a duplicate of the way there otherwise). Scores are generalized means, checkable by hand:
 `max` (longest trip, mean as tie-break), `sum` (weighted mean), `balanced` (weighted root-mean-square). Nothing but travel time enters a score.

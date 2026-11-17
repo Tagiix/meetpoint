@@ -46,6 +46,8 @@ header('Cache-Control: no-cache');
 <script>window.MP_BUILD = "<?= $v ?>";</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="assets/solver.js?v=<?= $v ?>"></script>
+<script src="assets/engine-core.js?v=<?= $v ?>"></script>
+<script src="assets/engine.js?v=<?= $v ?>"></script>
 <script src="assets/flow.js?v=<?= $v ?>"></script>
 <script src="assets/basemap.js?v=<?= $v ?>"></script>
 <script src="assets/api.js?v=<?= $v ?>"></script>
