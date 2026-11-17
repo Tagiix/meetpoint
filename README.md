@@ -44,7 +44,7 @@ nothing to download or build to run it.
 
 ## Known limits
 
-Meeting points are stations only. Times are estimates from average timetables (average waits, no real-time
-data). Bus line drawings are rough (IDFM's traces are partly straight between stops). English interface only.
+Meeting points are stations by default, or named places (restaurants, cafés, bars, parks, culture, sights) reached by a walk from a stop. Times are estimates from average timetables (average waits, no real-time
+data). Bus line drawings are rough (IDFM's traces are partly straight between stops). English and French only.
 No user accounts: anyone with an event link can add themselves; only the organizer's private link can change
 settings. Data licences and attribution: see [docs/DATA.md](docs/DATA.md).

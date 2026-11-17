@@ -48,7 +48,7 @@ Node: `node --check assets/*.js`. PHP: `php -l api/meetup.php`.
 1. **No secrets in responses.** `public_view()` strips `hash` and `adminHash`. The smoke test checks it.
 2. **Event files must not be web-readable.** They are `<id>.php` beginning with a `GUARD` line. Never store events as `.json` or in a public path.
 3. **Ownership checks live in PHP**, not in the UI: only the entry's token or the organizer key may change an entry; only the organizer key changes options or deletes.
-4. **Meeting candidates are rail stations only** (`graph.stations[0..railCount)`); bus stops are access/transfer nodes. `solver.js` relies on `Network.R`.
+4. **Meeting candidates are rail stations** (`graph.stations[0..railCount)`), plus, when the event option `meet` allows, named places (never bus stops; bus stops are access, egress and transfer nodes). `solver.js` relies on `Network.R`; a place's time is the direct trip or arrival at a stop within 900 m (500 m for bus stops) plus the walk.
 5. **`graph-bus.json` is tied to `graph.json`** (it stores their sizes and `mergeGraph` throws on mismatch). Rebuild both together.
 6. **Keep the app free of API keys and tile services.** The map is drawn from `data/`. (CARTO tiles started demanding a key in 2026; see DEVLOG.)
 7. **Relative URLs only** so subfolder installs work.
