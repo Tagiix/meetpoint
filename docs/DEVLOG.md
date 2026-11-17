@@ -61,4 +61,4 @@ minimize the longest trip, restaurants nearby), a nice flow animation, and the *
 - Activity filter (parks, culture, cinemas) beyond food and drink; French interface.
 - Rate limiting; event expiry is only 90 days after last write.
 - A licence file for the repository.
-- Confirm the "Create" issue is gone in Zen/Firefox (Firefox still will not launch headless in the dev sandbox: "Could not find profile folder", also with TMPDIR redirected); run the e2e test in Firefox (`playwright install firefox` worked, but headless launch failed in the sandbox).
+- Create in Zen/Firefox: confirmed working by the owner (2026-11-17). Not yet run in automated Firefox tests (headless Firefox will not launch in the dev sandbox: "Could not find profile folder").
