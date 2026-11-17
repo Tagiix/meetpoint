@@ -196,13 +196,18 @@
   }
   /* ask the server about every remembered event: forget the ones that no longer exist, refresh the titles (also names events added by an import link) */
   async function syncStoredEvents() {
-    const st = store(); let changed = false;
+    const st = store(); let changed = false; const gone = [], failed = [];
     await Promise.all(Object.keys(st.events).map(async (id) => {
       try { const e = await Api.get(id); if (st.events[id].title !== e.title) { st.events[id].title = e.title; changed = true; } }
-      catch (err) { if (/not found/.test(err.message)) { delete st.events[id]; changed = true; } }          // other errors (offline...): keep it
+      catch (err) {
+        if (/not found/.test(err.message)) { delete st.events[id]; changed = true; gone.push(id); }       // other errors (offline...): keep it
+        else failed.push(id + ": " + err.message);
+      }
     }));
-    if (!changed) return;
-    putStore(st); const box = $("home-events"); if (box && !S.ev) box.innerHTML = homeEvents();
+    if (changed) { putStore(st); const box = $("home-events"); if (box && !S.ev) box.innerHTML = homeEvents(); }
+    // say what happened, and keep saying it (no auto-hide): silent clean-ups are what made this hard to diagnose
+    if (gone.length) notice(`The server says ${gone.length} remembered event${gone.length === 1 ? "" : "s"} no longer exist${gone.length === 1 ? "s" : ""} (${gone.join(", ")}), so ${gone.length === 1 ? "it was" : "they were"} removed from the list.`, "warn");
+    else if (failed.length) notice(`Could not check ${failed.length} event${failed.length === 1 ? "" : "s"} with the server (${failed[0]}).`, "warn");
   }
 
   function showEvent() {
@@ -742,7 +747,7 @@
       let n = 0;
       for (const part of q.get("import").split(",")) { const [eid, k] = part.split("."); if (/^[a-z0-9]{8}$/.test(eid) && k) { setLocal(eid, { admin: k, title: getLocal(eid).title || "Event " + eid }); n++; } }   // placeholder title: listed at once, the real one follows
       history.replaceState(null, "", location.pathname);
-      setTimeout(() => { const left = Object.keys(store().events).length; notice(storageOk() ? `Remembered ${n} event${n === 1 ? "" : "s"} in this browser (${left} in the list).` : "This browser blocks site storage, so it cannot remember events. Allow cookies and site data for this address.", storageOk() ? "ok" : "warn"); }, 0);
+      setTimeout(() => { const left = Object.keys(store().events).length; if (!document.getElementById("notice").textContent) notice(storageOk() ? `Remembered ${n} event${n === 1 ? "" : "s"} in this browser (${left} in the list).` : "This browser blocks site storage, so it cannot remember events. Allow cookies and site data for this address.", storageOk() ? "ok" : "warn"); }, 0);
     }
     return id ? openEvent(id) : showHome();
   }
